@@ -781,5 +781,97 @@ function injectSchema() {
 /* Initial load */
 loadPosts();
 </script>
+  <!-- BLOG BROADCASTER - Auto-sends posts to homepage -->
+<script>
+(function() {
+  // Wait for page to fully load (important for site builders)
+  function broadcastPosts() {
+    var posts = [];
+    
+    // Try to find all blog post links on the page
+    // Google Sites typically wraps posts in specific structures
+    var allLinks = document.querySelectorAll('a[href*="/blogs/"], a[href*="boilerhealth"]');
+    
+    allLinks.forEach(function(link) {
+      var text = link.textContent.trim();
+      var href = link.href;
+      
+      // Skip navigation, empty, or very short links
+      if (!text || text.length < 5) return;
+      if (href === window.location.href) return;
+      if (href.includes('#')) return;
+      
+      // Try to find a nearby image
+      var img = null;
+      var parent = link.closest('div, article, section, li');
+      if (parent) {
+        img = parent.querySelector('img');
+      }
+      
+      // Try to find nearby description text
+      var excerpt = '';
+      if (parent) {
+        var nextP = parent.querySelector('p, span');
+        if (nextP && nextP !== link) {
+          excerpt = nextP.textContent.trim().substring(0, 150);
+        }
+      }
+      if (!excerpt) excerpt = 'Read more about ' + text + ' on our blog...';
+      
+      posts.push({
+        title: text,
+        url: href,
+        image: img ? img.src : '',
+        excerpt: excerpt,
+        date: new Date().toISOString().split('T')[0],
+        category: 'Blog'
+      });
+    });
+    
+    // Remove duplicates by URL
+    var seen = {};
+    posts = posts.filter(function(p) {
+      if (seen[p.url]) return false;
+      seen[p.url] = true;
+      return true;
+    });
+    
+    // Only keep first 10
+    posts = posts.slice(0, 10);
+    
+    // Save to localStorage with timestamp
+    var data = {
+      posts: posts,
+      updated: Date.now(),
+      source: window.location.href
+    };
+    
+    try {
+      localStorage.setItem('boilerhealth_blog_posts', JSON.stringify(data));
+      console.log('Blog posts broadcasted:', posts.length);
+    } catch(e) {
+      console.error('Failed to save posts:', e);
+    }
+  }
+  
+  // Broadcast after page loads
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', function() {
+      setTimeout(broadcastPosts, 2000); // Wait for dynamic content
+    });
+  } else {
+    setTimeout(broadcastPosts, 2000);
+  }
+  
+  // Also broadcast when user scrolls (catches lazy-loaded content)
+  var broadcasted = false;
+  window.addEventListener('scroll', function() {
+    if (!broadcasted && window.scrollY > 100) {
+      broadcasted = true;
+      setTimeout(broadcastPosts, 1000);
+    }
+  }, { once: true });
+})();
+</script>
 </body>
 </html>
