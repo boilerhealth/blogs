@@ -15,16 +15,49 @@ const CONFIG = {
 /* ============================
    UTILITIES
    ============================ */
+
+// Follow redirects (Apps Script often redirects)
 function fetchJson(url) {
   return new Promise((resolve, reject) => {
-    https.get(url, (res) => {
-      let data = '';
-      res.on('data', chunk => data += chunk);
-      res.on('end', () => {
-        try { resolve(JSON.parse(data)); }
-        catch (e) { reject(new Error('Invalid JSON from Apps Script: ' + e.message)); }
-      });
-    }).on('error', reject);
+    const maxRedirects = 5;
+    
+    function request(targetUrl, redirectsLeft) {
+      const client = targetUrl.startsWith('https:') ? https : require('http');
+      
+      client.get(targetUrl, { headers: { 'Accept': 'application/json' } }, (res) => {
+        // Handle redirect
+        if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+          if (redirectsLeft <= 0) {
+            reject(new Error('Too many redirects'));
+            return;
+          }
+          console.log(`Following redirect to ${res.headers.location}`);
+          request(res.headers.location, redirectsLeft - 1);
+          return;
+        }
+        
+        // Handle error status
+        if (res.statusCode !== 200) {
+          let body = '';
+          res.on('data', chunk => body += chunk);
+          res.on('end', () => reject(new Error(`HTTP ${res.statusCode}: ${body.slice(0, 200)}`)));
+          return;
+        }
+        
+        let data = '';
+        res.on('data', chunk => data += chunk);
+        res.on('end', () => {
+          try {
+            const parsed = JSON.parse(data);
+            resolve(parsed);
+          } catch (e) {
+            reject(new Error(`Invalid JSON from Apps Script.\nFirst 500 chars:\n${data.slice(0, 500)}`));
+          }
+        });
+      }).on('error', reject);
+    }
+    
+    request(url, maxRedirects);
   });
 }
 
@@ -578,7 +611,7 @@ ${schema ? `<script type="application/ld+json">${schema}</script>` : ''}
 
 <div class="scroll-progress" id="scrollProgress"></div>
 
-<header class="site-header">
+<<header class="site-header">
   <div class="header-inner">
     <div class="logo">Boiler<span>Health</span></div>
     <nav class="main-nav">
@@ -590,7 +623,7 @@ ${schema ? `<script type="application/ld+json">${schema}</script>` : ''}
 
 ${body}
 
-<footer class="site-footer">
+<<footer class="site-footer">
   <p>© 2026 BoilerHealth. All Rights Reserved.</p>
 </footer>
 
@@ -619,7 +652,7 @@ ${body}
    ============================ */
 async function build() {
   if (!CONFIG.scriptUrl) {
-    throw new Error('APPS_SCRIPT_URL environment variable is missing');
+    throw new Error('APPS_SCRIPT_URL environment variable is missing. Did you add the secret in Settings > Secrets and variables > Actions?');
   }
 
   // Clean / create dist
@@ -633,10 +666,12 @@ async function build() {
 
   // Fetch posts
   console.log('Fetching posts from Apps Script...');
+  console.log('URL:', CONFIG.scriptUrl.slice(0, 60) + '...');
+  
   const posts = await fetchJson(CONFIG.scriptUrl);
 
   if (!Array.isArray(posts)) {
-    throw new Error('Expected array from Apps Script, got: ' + typeof posts);
+    throw new Error('Expected array from Apps Script, got: ' + typeof posts + '\nData: ' + JSON.stringify(posts).slice(0, 200));
   }
 
   const sortedPosts = posts.sort((a, b) => new Date(b.date) - new Date(a.date));
@@ -808,7 +843,7 @@ function filterPosts(category) {
 
   /* ---------- SITEMAP.XML ---------- */
   const sitemap = `<?xml version="1.0" encoding="UTF-8"?>
-<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+<<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
   <url>
     <loc>${CONFIG.siteUrl}/index.html</loc>
     <lastmod>${new Date().toISOString().split('T')[0]}</lastmod>
@@ -843,6 +878,7 @@ Host: ${CONFIG.siteUrl}`;
 }
 
 build().catch(err => {
-  console.error('Build failed:', err);
+  console.error('Build failed:', err.message);
+  if (err.stack) console.error(err.stack);
   process.exit(1);
 });
