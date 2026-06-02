@@ -32,6 +32,7 @@ jobs:
         env:
           APPS_SCRIPT_URL: ${{ secrets.APPS_SCRIPT_URL }}
           SITE_URL: ${{ vars.SITE_URL }}
+          FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
         run: node build.js
 
       - name: Upload to GitHub Pages
@@ -49,4 +50,3 @@ jobs:
       - name: Deploy
         id: deployment
         uses: actions/deploy-pages@v4
-        
