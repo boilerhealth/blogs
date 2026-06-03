@@ -75,6 +75,17 @@ function formatDate(dateStr) {
   });
 }
 
+/* NEW: Convert title to URL-safe slug */
+function slugify(title) {
+  return title
+    .toLowerCase()
+    .replace(/[^a-z0-9\s-]/g, '')     // remove special chars
+    .trim()
+    .replace(/\s+/g, '-')              // spaces → dashes
+    .replace(/-+/g, '-')               // multiple dashes → single
+    .slice(0, 80);                     // max 80 chars
+}
+
 /* ============================
    CSS
    ============================ */
@@ -608,7 +619,7 @@ ${schema ? `<script type="application/ld+json">${schema}</script>` : ''}
 
 <div class="scroll-progress" id="scrollProgress"></div>
 
-<<header class="site-header">
+<header class="site-header">
   <div class="header-inner">
     <div class="logo">Boiler<span>Health</span></div>
     <nav class="main-nav">
@@ -620,7 +631,7 @@ ${schema ? `<script type="application/ld+json">${schema}</script>` : ''}
 
 ${body}
 
-<<footer class="site-footer">
+<footer class="site-footer">
   <p>© 2026 BoilerHealth. All Rights Reserved.</p>
 </footer>
 
@@ -674,6 +685,11 @@ async function build() {
   const sortedPosts = posts.sort((a, b) => new Date(b.date) - new Date(a.date));
   console.log(`Fetched ${sortedPosts.length} posts`);
 
+  /* Add slug to each post */
+  sortedPosts.forEach(post => {
+    post.slug = slugify(post.title);
+  });
+
   /* ---------- INDEX PAGE ---------- */
   const indexBody = `
 <div class="blog-hero">
@@ -699,7 +715,7 @@ async function build() {
 <div class="blog-section">
   <div id="blogGrid" class="blog-grid">
     ${sortedPosts.map((post, idx) => `
-    <a href="post/${post.id}.html" class="blog-card reveal-scale revealed stagger-${Math.min(idx % 6 + 1, 6)}">
+    <a href="post/${post.slug}.html" class="blog-card reveal-scale revealed stagger-${Math.min(idx % 6 + 1, 6)}">
       <div class="blog-img-wrap">
         <img class="blog-img" src="${post.image || ''}" alt="${escapeHtml(post.title)}" onerror="this.style.display='none'">
       </div>
@@ -725,7 +741,7 @@ function filterPosts(category) {
   const grid = document.getElementById('blogGrid');
   const filtered = category === 'all' ? allPosts : allPosts.filter(p => p.category === category);
   grid.innerHTML = filtered.map((post, idx) => \`
-    <a href="post/\${post.id}.html" class="blog-card reveal-scale revealed stagger-\${Math.min(idx % 6 + 1, 6)}">
+    <a href="post/\${post.slug}.html" class="blog-card reveal-scale revealed stagger-\${Math.min(idx % 6 + 1, 6)}">
       <div class="blog-img-wrap">
         <img class="blog-img" src="\${post.image || ''}" alt="\${post.title.replace(/"/g,'&quot;')}" onerror="this.style.display='none'">
       </div>
@@ -756,7 +772,7 @@ function filterPosts(category) {
       "description": post.excerpt,
       "image": post.image || undefined,
       "datePublished": post.date,
-      "url": `${CONFIG.siteUrl}/post/${post.id}.html`,
+      "url": `${CONFIG.siteUrl}/post/${post.slug}.html`,
       "articleSection": post.category
     }))
   }, null, 2);
@@ -808,28 +824,28 @@ function filterPosts(category) {
       },
       "mainEntityOfPage": {
         "@type": "WebPage",
-        "@id": `${CONFIG.siteUrl}/post/${post.id}.html`
+        "@id": `${CONFIG.siteUrl}/post/${post.slug}.html`
       }
     }, null, 2);
 
-    const postPath = path.join(CONFIG.postsDir, `${post.id}.html`);
+    const postPath = path.join(CONFIG.postsDir, `${post.slug}.html`);
     fs.writeFileSync(
       postPath,
       generatePage({
         title: `${post.title} | BoilerHealth Blogs`,
         description: post.excerpt,
-        canonical: `${CONFIG.siteUrl}/post/${post.id}.html`,
+        canonical: `${CONFIG.siteUrl}/post/${post.slug}.html`,
         body: postBody,
         schema: postSchema,
         cssPath: '../style.css'
       })
     );
-    console.log(`  Wrote post: ${postPath}`);
+    console.log(`  Wrote post: ${post.slug}.html`);
   }
 
   /* ---------- SITEMAP.XML ---------- */
   const sitemap = `<?xml version="1.0" encoding="UTF-8"?>
-<<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
   <url>
     <loc>${CONFIG.siteUrl}/index.html</loc>
     <lastmod>${new Date().toISOString().split('T')[0]}</lastmod>
@@ -838,7 +854,7 @@ function filterPosts(category) {
   </url>
   ${sortedPosts.map(post => `
   <url>
-    <loc>${CONFIG.siteUrl}/post/${post.id}.html</loc>
+    <loc>${CONFIG.siteUrl}/post/${post.slug}.html</loc>
     <lastmod>${post.date}</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.8</priority>
@@ -856,7 +872,7 @@ Host: ${CONFIG.siteUrl}`;
   fs.writeFileSync(path.join(CONFIG.distDir, 'robots.txt'), robots);
 
   console.log(`✅ Build complete:
-  - ${sortedPosts.length} post pages
+  - ${sortedPosts.length} post pages with title-based URLs
   - 1 index page
   - sitemap.xml (${sortedPosts.length + 1} URLs)
   - robots.txt
