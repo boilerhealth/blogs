@@ -19,10 +19,10 @@ const CONFIG = {
 function fetchJson(url) {
   return new Promise((resolve, reject) => {
     const maxRedirects = 5;
-    
+
     function request(targetUrl, redirectsLeft) {
       const client = targetUrl.startsWith('https:') ? https : require('http');
-      
+
       client.get(targetUrl, { headers: { 'Accept': 'application/json' } }, (res) => {
         if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
           if (redirectsLeft <= 0) {
@@ -33,14 +33,14 @@ function fetchJson(url) {
           request(res.headers.location, redirectsLeft - 1);
           return;
         }
-        
+
         if (res.statusCode !== 200) {
           let body = '';
           res.on('data', chunk => body += chunk);
           res.on('end', () => reject(new Error(`HTTP ${res.statusCode}: ${body.slice(0, 200)}`)));
           return;
         }
-        
+
         let data = '';
         res.on('data', chunk => data += chunk);
         res.on('end', () => {
@@ -53,7 +53,7 @@ function fetchJson(url) {
         });
       }).on('error', reject);
     }
-    
+
     request(url, maxRedirects);
   });
 }
@@ -674,7 +674,7 @@ async function build() {
   // Fetch posts
   console.log('Fetching posts from Apps Script...');
   console.log('URL:', CONFIG.scriptUrl.slice(0, 60) + '...');
-  
+
   const posts = await fetchJson(CONFIG.scriptUrl);
 
   if (!Array.isArray(posts)) {
@@ -842,7 +842,7 @@ function filterPosts(category) {
     console.log(`  Wrote post: ${post.slug}.html`);
   }
 
-    /* ---------- SITEMAP.XML ---------- */
+  /* ---------- SITEMAP.XML ---------- */
   function formatSitemapDate(dateStr) {
     if (!dateStr) return new Date().toISOString().split('T')[0];
     const d = new Date(dateStr);
@@ -853,7 +853,7 @@ function filterPosts(category) {
   const today = new Date().toISOString().split('T')[0];
 
   const sitemap = `<?xml version="1.0" encoding="UTF-8"?>
-<<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
   <url>
     <loc>${baseUrl}/index.html</loc>
     <lastmod>${today}</lastmod>
@@ -868,11 +868,13 @@ function filterPosts(category) {
   </url>`).join('')}
 </urlset>`;
 
+  fs.writeFileSync(path.join(CONFIG.distDir, 'sitemap.xml'), sitemap);
+
   /* ---------- ROBOTS.TXT ---------- */
   const robots = `User-agent: *
 Allow: /
-Sitemap: ${CONFIG.siteUrl}/sitemap.xml
-Host: ${CONFIG.siteUrl}`;
+Sitemap: ${baseUrl}/sitemap.xml
+Host: ${baseUrl}`;
 
   fs.writeFileSync(path.join(CONFIG.distDir, 'robots.txt'), robots);
 
