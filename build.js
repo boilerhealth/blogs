@@ -16,7 +16,6 @@ const CONFIG = {
    UTILITIES
    ============================ */
 
-// Follow redirects (Apps Script often redirects)
 function fetchJson(url) {
   return new Promise((resolve, reject) => {
     const maxRedirects = 5;
@@ -25,7 +24,6 @@ function fetchJson(url) {
       const client = targetUrl.startsWith('https:') ? https : require('http');
       
       client.get(targetUrl, { headers: { 'Accept': 'application/json' } }, (res) => {
-        // Handle redirect
         if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
           if (redirectsLeft <= 0) {
             reject(new Error('Too many redirects'));
@@ -36,7 +34,6 @@ function fetchJson(url) {
           return;
         }
         
-        // Handle error status
         if (res.statusCode !== 200) {
           let body = '';
           res.on('data', chunk => body += chunk);
@@ -79,7 +76,7 @@ function formatDate(dateStr) {
 }
 
 /* ============================
-   CSS (Preserved from your design)
+   CSS
    ============================ */
 const BASE_CSS = `:root{
   --bg:#fafaf9;
@@ -611,11 +608,11 @@ ${schema ? `<script type="application/ld+json">${schema}</script>` : ''}
 
 <div class="scroll-progress" id="scrollProgress"></div>
 
-<header class="site-header">
+<<header class="site-header">
   <div class="header-inner">
     <div class="logo">Boiler<span>Health</span></div>
     <nav class="main-nav">
-      <a href="${CONFIG.siteUrl}/index.html">All Posts</a>
+      <a href="./index.html">All Posts</a>
       <a href="https://boilerhealth.com" class="nav-btn">Main Site</a>
     </nav>
   </div>
@@ -623,7 +620,7 @@ ${schema ? `<script type="application/ld+json">${schema}</script>` : ''}
 
 ${body}
 
-<footer class="site-footer">
+<<footer class="site-footer">
   <p>© 2026 BoilerHealth. All Rights Reserved.</p>
 </footer>
 
@@ -702,7 +699,7 @@ async function build() {
 <div class="blog-section">
   <div id="blogGrid" class="blog-grid">
     ${sortedPosts.map((post, idx) => `
-    <a href="${CONFIG.siteUrl}/post/${post.id}.html" class="blog-card reveal-scale stagger-${Math.min(idx % 6 + 1, 6)}">
+    <a href="post/${post.id}.html" class="blog-card reveal-scale revealed stagger-${Math.min(idx % 6 + 1, 6)}">
       <div class="blog-img-wrap">
         <img class="blog-img" src="${post.image || ''}" alt="${escapeHtml(post.title)}" onerror="this.style.display='none'">
       </div>
@@ -724,11 +721,11 @@ async function build() {
 const allPosts = ${JSON.stringify(sortedPosts)};
 function filterPosts(category) {
   document.querySelectorAll('.filter-btn').forEach(btn => btn.classList.remove('active'));
-  event.target.classList.add('active');
+  if(event && event.target) event.target.classList.add('active');
   const grid = document.getElementById('blogGrid');
   const filtered = category === 'all' ? allPosts : allPosts.filter(p => p.category === category);
   grid.innerHTML = filtered.map((post, idx) => \`
-    <a href="${CONFIG.siteUrl}/post/\${post.id}.html" class="blog-card reveal-scale stagger-\${Math.min(idx % 6 + 1, 6)}">
+    <a href="post/\${post.id}.html" class="blog-card reveal-scale revealed stagger-\${Math.min(idx % 6 + 1, 6)}">
       <div class="blog-img-wrap">
         <img class="blog-img" src="\${post.image || ''}" alt="\${post.title.replace(/"/g,'&quot;')}" onerror="this.style.display='none'">
       </div>
@@ -743,19 +740,6 @@ function filterPosts(category) {
       </div>
     </a>
   \`).join('');
-  setTimeout(() => {
-    document.querySelectorAll('.reveal-scale').forEach(el => {
-      const o = new IntersectionObserver((entries) => {
-        entries.forEach(entry => {
-          if(entry.isIntersecting){
-            entry.target.classList.add('revealed');
-            o.unobserve(entry.target);
-          }
-        });
-      }, {threshold:0.1});
-      o.observe(el);
-    });
-  }, 100);
 }
 </script>
 `;
@@ -793,7 +777,7 @@ function filterPosts(category) {
   for (const post of sortedPosts) {
     const postBody = `
 <div class="article-view active" style="display:block;">
-  <button class="back-btn" onclick="location.href='${CONFIG.siteUrl}/index.html'">← Back to all posts</button>
+  <button class="back-btn" onclick="location.href='../index.html'">← Back to all posts</button>
   <img class="article-hero-img" src="${post.image || ''}" alt="${escapeHtml(post.title)}">
   <div class="article-header">
     <div class="blog-meta">
@@ -828,8 +812,9 @@ function filterPosts(category) {
       }
     }, null, 2);
 
+    const postPath = path.join(CONFIG.postsDir, `${post.id}.html`);
     fs.writeFileSync(
-      path.join(CONFIG.postsDir, `${post.id}.html`),
+      postPath,
       generatePage({
         title: `${post.title} | BoilerHealth Blogs`,
         description: post.excerpt,
@@ -839,11 +824,12 @@ function filterPosts(category) {
         cssPath: '../style.css'
       })
     );
+    console.log(`  Wrote post: ${postPath}`);
   }
 
   /* ---------- SITEMAP.XML ---------- */
   const sitemap = `<?xml version="1.0" encoding="UTF-8"?>
-<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+<<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
   <url>
     <loc>${CONFIG.siteUrl}/index.html</loc>
     <lastmod>${new Date().toISOString().split('T')[0]}</lastmod>
