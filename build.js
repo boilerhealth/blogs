@@ -75,15 +75,14 @@ function formatDate(dateStr) {
   });
 }
 
-/* NEW: Convert title to URL-safe slug */
 function slugify(title) {
   return title
     .toLowerCase()
-    .replace(/[^a-z0-9\s-]/g, '')     // remove special chars
+    .replace(/[^a-z0-9\s-]/g, '')
     .trim()
-    .replace(/\s+/g, '-')              // spaces → dashes
-    .replace(/-+/g, '-')               // multiple dashes → single
-    .slice(0, 80);                     // max 80 chars
+    .replace(/\s+/g, '-')
+    .replace(/-+/g, '-')
+    .slice(0, 80);
 }
 
 /* ============================
