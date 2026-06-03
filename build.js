@@ -842,38 +842,30 @@ function filterPosts(category) {
     console.log(`  Wrote post: ${post.slug}.html`);
   }
 
-  /* ---------- SITEMAP.XML ---------- */
-function formatSitemapDate(dateStr) {
-  if (!dateStr) return new Date().toISOString().split('T')[0];
-  const d = new Date(dateStr);
-  return isNaN(d) ? String(dateStr).slice(0, 10) : d.toISOString().split('T')[0];
-}
+    /* ---------- SITEMAP.XML ---------- */
+  function formatSitemapDate(dateStr) {
+    if (!dateStr) return new Date().toISOString().split('T')[0];
+    const d = new Date(dateStr);
+    return isNaN(d) ? String(dateStr).slice(0, 10) : d.toISOString().split('T')[0];
+  }
 
-const baseUrl = CONFIG.siteUrl.replace(/\/$/, '');
+  const baseUrl = CONFIG.siteUrl.replace(/\/$/, '');
+  const today = new Date().toISOString().split('T')[0];
 
-const sitemapEntries = [
-  {
-    loc: `${baseUrl}/index.html`,
-    lastmod: new Date().toISOString().split('T')[0],
-    priority: '1.0',
-    changefreq: 'daily'
-  },
-  ...sortedPosts.map(post => ({
-    loc: `${baseUrl}/post/${post.slug}.html`,
-    lastmod: formatSitemapDate(post.date),
-    priority: '0.8',
-    changefreq: 'weekly'
-  }))
-];
-
-const sitemap = `<?xml version="1.0" encoding="UTF-8"?>
+  const sitemap = `<?xml version="1.0" encoding="UTF-8"?>
 <<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
-${sitemapEntries.map(e => `  <url>
-    <loc>${e.loc}</loc>
-    <lastmod>${e.lastmod}</lastmod>
-    <changefreq>${e.changefreq}</changefreq>
-    <priority>${e.priority}</priority>
-  </url>`).join('\n')}
+  <url>
+    <loc>${baseUrl}/index.html</loc>
+    <lastmod>${today}</lastmod>
+    <changefreq>daily</changefreq>
+    <priority>1.0</priority>
+  </url>${sortedPosts.map(post => `
+  <url>
+    <loc>${baseUrl}/post/${post.slug}.html</loc>
+    <lastmod>${formatSitemapDate(post.date)}</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.8</priority>
+  </url>`).join('')}
 </urlset>`;
 
   /* ---------- ROBOTS.TXT ---------- */
