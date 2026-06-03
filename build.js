@@ -623,7 +623,7 @@ ${schema ? `<script type="application/ld+json">${schema}</script>` : ''}
     <div class="logo">Boiler<span>Health</span></div>
     <nav class="main-nav">
       <a href="./index.html">All Posts</a>
-      <a href="https://boilerhealth.com" class="nav-btn">Main Site</a>
+      <a href="https://boilerhealth.github.io/" class="nav-btn">Main Site</a>
     </nav>
   </div>
 </header>
