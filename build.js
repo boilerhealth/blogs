@@ -660,7 +660,7 @@ ${body}
 function generatePostRendererJS(scriptUrl) {
   return `<script>
 (function(){
-  const SCRIPT_URL = '${scriptUrl.replace(/'/g, "\\'")}';
+  const SCRIPT_URL = '${scriptUrl.replace(/'/g, "\'")}';
 
   function escapeHtml(text) {
     if (!text) return '';
@@ -682,16 +682,16 @@ function generatePostRendererJS(scriptUrl) {
   function slugify(title) {
     return title
       .toLowerCase()
-      .replace(/[^a-z0-9\\s-]/g, '')
+      .replace(/[^a-z0-9\s-]/g, '')
       .trim()
-      .replace(/\\s+/g, '-')
+      .replace(/\s+/g, '-')
       .replace(/-+/g, '-')
       .slice(0, 80);
   }
 
   async function loadPost() {
     const path = window.location.pathname;
-    const match = path.match(/\\/post\\/(.+)\\.html?$/);
+    const match = path.match(/\/post\/(.+)\.html?$/);
     const targetSlug = match ? match[1] : '';
     const container = document.getElementById('articleView');
 
@@ -713,7 +713,7 @@ function generatePostRendererJS(scriptUrl) {
       if (metaDesc) metaDesc.content = escapeHtml(post.excerpt);
 
       container.innerHTML =
-        '<button class="back-btn" onclick="location.href=\\'../index.html\\'">← Back to all posts</button>' +
+        '<button class="back-btn" onclick="location.href=\'../index.html\'">← Back to all posts</button>' +
         '<img class="article-hero-img" src="' + (post.image || '') + '" alt="' + escapeHtml(post.title) + '">' +
         '<div class="article-header">' +
           '<div class="blog-meta">' +
@@ -760,7 +760,7 @@ async function build() {
   const posts = await fetchJson(CONFIG.scriptUrl);
 
   if (!Array.isArray(posts)) {
-    throw new Error('Expected array from Apps Script, got: ' + typeof posts + '\\nData: ' + JSON.stringify(posts).slice(0, 200));
+    throw new Error('Expected array from Apps Script, got: ' + typeof posts + '\nData: ' + JSON.stringify(posts).slice(0, 200));
   }
 
   const sortedPosts = posts.sort((a, b) => new Date(b.date) - new Date(a.date));
@@ -771,7 +771,7 @@ async function build() {
     post.slug = slugify(post.title);
   });
 
-  const scriptUrlSafe = CONFIG.scriptUrl.replace(/'/g, "\\'");
+  const scriptUrlSafe = CONFIG.scriptUrl.replace(/'/g, "\'");
 
   /* ---------- INDEX PAGE (DYNAMIC) ---------- */
   const indexBody = `
@@ -826,9 +826,9 @@ async function build() {
   function slugify(title) {
     return title
       .toLowerCase()
-      .replace(/[^a-z0-9\\s-]/g, '')
+      .replace(/[^a-z0-9\s-]/g, '')
       .trim()
-      .replace(/\\s+/g, '-')
+      .replace(/\s+/g, '-')
       .replace(/-+/g, '-')
       .slice(0, 80);
   }
@@ -842,7 +842,7 @@ async function build() {
     grid.innerHTML = posts.map(function(post, idx){
       return '<a href="post/' + post.slug + '.html" class="blog-card reveal-scale revealed stagger-' + Math.min(idx % 6 + 1, 6) + '">' +
         '<div class="blog-img-wrap">' +
-          '<img class="blog-img" src="' + (post.image || '') + '" alt="' + escapeHtml(post.title) + '" onerror="this.style.display=\\'none\\'">' +
+          '<img class="blog-img" src="' + (post.image || '') + '" alt="' + escapeHtml(post.title) + '" onerror="this.style.display=\'none\'">' +
         '</div>' +
         '<div class="blog-body">' +
           '<div class="blog-meta">' +
@@ -970,12 +970,12 @@ ${postRenderer}
 <script>
 (function(){
   const path = window.location.pathname;
-  if (!path.match(/\\/post\\/(.+)\\.html?$/)) {
+  if (!path.match(/\/post\/(.+)\.html?$/)) {
     document.getElementById('articleView').innerHTML =
       '<div class="error" style="padding-top:120px">' +
       '<h2 style="color:var(--text);margin-bottom:16px">Page Not Found</h2>' +
       '<p>The page you are looking for does not exist.</p>' +
-      '<button class="back-btn" style="margin-top:24px" onclick="location.href=\\'./index.html\\'">← Back to all posts</button>' +
+      '<button class="back-btn" style="margin-top:24px" onclick="location.href=\'./index.html\'">← Back to all posts</button>' +
       '</div>';
   }
 })();
@@ -1002,7 +1002,7 @@ ${postRenderer}
     return isNaN(d) ? String(dateStr).slice(0, 10) : d.toISOString().split('T')[0];
   }
 
-  const baseUrl = CONFIG.siteUrl.replace(/\\/$/, '');
+  const baseUrl = CONFIG.siteUrl.replace(/\/$/, '');
   const today = new Date().toISOString().split('T')[0];
 
   const sitemap = `<?xml version="1.0" encoding="UTF-8"?>
