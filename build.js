@@ -655,88 +655,6 @@ ${body}
 }
 
 /* ============================
-   DYNAMIC POST RENDERER JS
-   ============================ */
-function generatePostRendererJS(scriptUrl) {
-  return `<script>
-(function(){
-  const SCRIPT_URL = '${scriptUrl.replace(/'/g, "\'")}';
-
-  function escapeHtml(text) {
-    if (!text) return '';
-    return String(text)
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;')
-      .replace(/'/g, '&#039;');
-  }
-
-  function formatDate(dateStr) {
-    const d = new Date(dateStr);
-    return isNaN(d) ? (dateStr || '') : d.toLocaleDateString('en-GB', {
-      day: 'numeric', month: 'long', year: 'numeric'
-    });
-  }
-
-  function slugify(title) {
-    return title
-      .toLowerCase()
-      .replace(/[^a-z0-9\s-]/g, '')
-      .trim()
-      .replace(/\s+/g, '-')
-      .replace(/-+/g, '-')
-      .slice(0, 80);
-  }
-
-  async function loadPost() {
-    const path = window.location.pathname;
-    const match = path.match(/\/post\/(.+)\.html?$/);
-    const targetSlug = match ? match[1] : '';
-    const container = document.getElementById('articleView');
-
-    if (!targetSlug) {
-      container.innerHTML = '<div class="error">No post specified.<br><button onclick="history.back()">Go Back</button></div>';
-      return;
-    }
-
-    try {
-      const res = await fetch(SCRIPT_URL);
-      if (!res.ok) throw new Error('HTTP ' + res.status);
-      const posts = await res.json();
-      if (!Array.isArray(posts)) throw new Error('Invalid data');
-      const post = posts.find(function(p){ return slugify(p.title) === targetSlug; });
-      if (!post) throw new Error('Post not found');
-
-      document.title = escapeHtml(post.title) + ' | BoilerHealth Blogs';
-      const metaDesc = document.querySelector('meta[name="description"]');
-      if (metaDesc) metaDesc.content = escapeHtml(post.excerpt);
-
-      container.innerHTML =
-        '<button class="back-btn" onclick="location.href=\'../index.html\'">← Back to all posts</button>' +
-        '<img class="article-hero-img" src="' + (post.image || '') + '" alt="' + escapeHtml(post.title) + '">' +
-        '<div class="article-header">' +
-          '<div class="blog-meta">' +
-            '<span class="blog-category">' + escapeHtml(post.category) + '</span>' +
-            '<span>' + formatDate(post.date) + '</span>' +
-          '</div>' +
-          '<h1>' + escapeHtml(post.title) + '</h1>' +
-        '</div>' +
-        '<div class="article-body">' +
-          (post.content || post.processedContent || '<p>No content.</p>') +
-        '</div>';
-    } catch (err) {
-      container.innerHTML = '<div class="error">Failed to load post.<br><button onclick="loadPost()">Retry</button></div>';
-      console.error(err);
-    }
-  }
-
-  loadPost();
-})();
-</script>`;
-}
-
-/* ============================
    BUILD
    ============================ */
 async function build() {
@@ -771,9 +689,7 @@ async function build() {
     post.slug = slugify(post.title);
   });
 
-  const scriptUrlSafe = CONFIG.scriptUrl.replace(/'/g, "\'");
-
-  /* ---------- INDEX PAGE (DYNAMIC) ---------- */
+  /* ---------- INDEX PAGE ---------- */
   const indexBody = `
 <div class="blog-hero">
   <h1>
@@ -797,92 +713,49 @@ async function build() {
 
 <div class="blog-section">
   <div id="blogGrid" class="blog-grid">
-    <div class="loading">Loading posts...</div>
+    ${sortedPosts.map((post, idx) => `
+    <a href="post/${post.slug}.html" class="blog-card reveal-scale revealed stagger-${Math.min(idx % 6 + 1, 6)}">
+      <div class="blog-img-wrap">
+        <img class="blog-img" src="${post.image || ''}" alt="${escapeHtml(post.title)}" onerror="this.style.display='none'">
+      </div>
+      <div class="blog-body">
+        <div class="blog-meta">
+          <span class="blog-category">${escapeHtml(post.category)}</span>
+          <span>${formatDate(post.date)}</span>
+        </div>
+        <h3>${escapeHtml(post.title)}</h3>
+        <p>${escapeHtml(post.excerpt)}</p>
+        <span class="read-more">Read Article →</span>
+      </div>
+    </a>
+    `).join('')}
   </div>
 </div>
 
 <script>
-(function(){
-  const SCRIPT_URL = '${scriptUrlSafe}';
-  let allPosts = [];
-
-  function escapeHtml(text) {
-    if (!text) return '';
-    return String(text)
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;')
-      .replace(/'/g, '&#039;');
-  }
-
-  function formatDate(dateStr) {
-    const d = new Date(dateStr);
-    return isNaN(d) ? (dateStr || '') : d.toLocaleDateString('en-GB', {
-      day: 'numeric', month: 'long', year: 'numeric'
-    });
-  }
-
-  function slugify(title) {
-    return title
-      .toLowerCase()
-      .replace(/[^a-z0-9\s-]/g, '')
-      .trim()
-      .replace(/\s+/g, '-')
-      .replace(/-+/g, '-')
-      .slice(0, 80);
-  }
-
-  function renderPosts(posts) {
-    const grid = document.getElementById('blogGrid');
-    if (!posts.length) {
-      grid.innerHTML = '<div class="loading">No posts yet.</div>';
-      return;
-    }
-    grid.innerHTML = posts.map(function(post, idx){
-      return '<a href="post/' + post.slug + '.html" class="blog-card reveal-scale revealed stagger-' + Math.min(idx % 6 + 1, 6) + '">' +
-        '<div class="blog-img-wrap">' +
-          '<img class="blog-img" src="' + (post.image || '') + '" alt="' + escapeHtml(post.title) + '" onerror="this.style.display=\'none\'">' +
-        '</div>' +
-        '<div class="blog-body">' +
-          '<div class="blog-meta">' +
-            '<span class="blog-category">' + escapeHtml(post.category) + '</span>' +
-            '<span>' + formatDate(post.date) + '</span>' +
-          '</div>' +
-          '<h3>' + escapeHtml(post.title) + '</h3>' +
-          '<p>' + escapeHtml(post.excerpt) + '</p>' +
-          '<span class="read-more">Read Article →</span>' +
-        '</div>' +
-      '</a>';
-    }).join('');
-  }
-
-  async function loadPosts() {
-    const grid = document.getElementById('blogGrid');
-    grid.innerHTML = '<div class="loading">Loading posts...</div>';
-    try {
-      const res = await fetch(SCRIPT_URL);
-      if (!res.ok) throw new Error('HTTP ' + res.status);
-      const posts = await res.json();
-      if (!Array.isArray(posts)) throw new Error('Invalid data');
-      allPosts = posts.sort(function(a,b){ return new Date(b.date) - new Date(a.date); });
-      allPosts.forEach(function(p){ p.slug = slugify(p.title); });
-      renderPosts(allPosts);
-    } catch (err) {
-      grid.innerHTML = '<div class="error">Failed to load posts.<br><button onclick="loadPosts()">Retry</button></div>';
-      console.error(err);
-    }
-  }
-
-  window.filterPosts = function(category) {
-    document.querySelectorAll('.filter-btn').forEach(function(btn){ btn.classList.remove('active'); });
-    if (event && event.target) event.target.classList.add('active');
-    const filtered = category === 'all' ? allPosts : allPosts.filter(function(p){ return p.category === category; });
-    renderPosts(filtered);
-  };
-
-  loadPosts();
-})();
+const allPosts = ${JSON.stringify(sortedPosts)};
+function filterPosts(category) {
+  document.querySelectorAll('.filter-btn').forEach(btn => btn.classList.remove('active'));
+  if(event && event.target) event.target.classList.add('active');
+  const grid = document.getElementById('blogGrid');
+  const filtered = category === 'all' ? allPosts : allPosts.filter(p => p.category === category);
+  grid.innerHTML = filtered.map((post, idx) => \`
+    <a href="post/\${post.slug}.html" class="blog-card reveal-scale revealed stagger-\${Math.min(idx % 6 + 1, 6)}">
+      <div class="blog-img-wrap">
+        <img class="blog-img" src="\${post.image || ''}" alt="\${post.title.replace(/"/g,'&quot;')}" onerror="this.style.display='none'">
+      </div>
+      <div class="blog-body">
+        <div class="blog-meta">
+          <span class="blog-category">\${post.category}</span>
+          <span>\${new Date(post.date).toLocaleDateString('en-GB',{day:'numeric',month:'long',year:'numeric'})}</span>
+        </div>
+        <h3>\${post.title}</h3>
+        <p>\${post.excerpt}</p>
+        <span class="read-more">Read Article →</span>
+      </div>
+    </a>
+  \`).join('');
+}
 </script>
 `;
 
@@ -915,15 +788,23 @@ async function build() {
     })
   );
 
-  /* ---------- INDIVIDUAL POST PAGES (DYNAMIC) ---------- */
-  const postRenderer = generatePostRendererJS(CONFIG.scriptUrl);
-
+  /* ---------- INDIVIDUAL POST PAGES ---------- */
   for (const post of sortedPosts) {
     const postBody = `
-<div class="article-view active" id="articleView" style="display:block;">
-  <div class="loading">Loading post...</div>
+<div class="article-view active" style="display:block;">
+  <button class="back-btn" onclick="location.href='../index.html'">← Back to all posts</button>
+  <img class="article-hero-img" src="${post.image || ''}" alt="${escapeHtml(post.title)}">
+  <div class="article-header">
+    <div class="blog-meta">
+      <span class="blog-category">${escapeHtml(post.category)}</span>
+      <span>${formatDate(post.date)}</span>
+    </div>
+    <h1>${escapeHtml(post.title)}</h1>
+  </div>
+  <div class="article-body">
+    ${post.content || post.processedContent || '<p>No content.</p>'}
+  </div>
 </div>
-${postRenderer}
 `;
 
     const postSchema = JSON.stringify({
@@ -960,40 +841,6 @@ ${postRenderer}
     );
     console.log(`  Wrote post: ${post.slug}.html`);
   }
-
-  /* ---------- 404.HTML (CATCH-ALL FOR NEW POSTS) ---------- */
-  const notFoundBody = `
-<div class="article-view active" id="articleView" style="display:block;">
-  <div class="loading">Loading post...</div>
-</div>
-${postRenderer}
-<script>
-(function(){
-  const path = window.location.pathname;
-  if (!path.match(/\/post\/(.+)\.html?$/)) {
-    document.getElementById('articleView').innerHTML =
-      '<div class="error" style="padding-top:120px">' +
-      '<h2 style="color:var(--text);margin-bottom:16px">Page Not Found</h2>' +
-      '<p>The page you are looking for does not exist.</p>' +
-      '<button class="back-btn" style="margin-top:24px" onclick="location.href=\'./index.html\'">← Back to all posts</button>' +
-      '</div>';
-  }
-})();
-</script>
-`;
-
-  fs.writeFileSync(
-    path.join(CONFIG.distDir, '404.html'),
-    generatePage({
-      title: 'BoilerHealth Blogs',
-      description: 'Page not found.',
-      canonical: CONFIG.siteUrl + '/404.html',
-      body: notFoundBody,
-      schema: '',
-      cssPath: './style.css'
-    })
-  );
-  console.log('  Wrote 404.html (catch-all for new posts)');
 
   /* ---------- SITEMAP.XML ---------- */
   function formatSitemapDate(dateStr) {
@@ -1032,15 +879,11 @@ Host: ${baseUrl}`;
   fs.writeFileSync(path.join(CONFIG.distDir, 'robots.txt'), robots);
 
   console.log(`✅ Build complete:
-  - ${sortedPosts.length} post pages with title-based URLs (post/slug.html)
-  - 1 dynamic index page (fetches live posts)
-  - 404.html (catch-all for new posts added after build)
+  - ${sortedPosts.length} post pages with title-based URLs
+  - 1 index page
   - sitemap.xml (${sortedPosts.length + 1} URLs)
   - robots.txt
-  - style.css
-
-New posts added to your Sheet after this build will work instantly via 404.html,
-while existing posts have real files for fast SEO-friendly loading.`);
+  - style.css`);
 }
 
 build().catch(err => {
