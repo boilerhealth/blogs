@@ -19,41 +19,27 @@ const CONFIG = {
 function fetchJson(url) {
   return new Promise((resolve, reject) => {
     const maxRedirects = 5;
-
     function request(targetUrl, redirectsLeft) {
       const client = targetUrl.startsWith('https:') ? https : require('http');
-
       client.get(targetUrl, { headers: { 'Accept': 'application/json' } }, (res) => {
         if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
-          if (redirectsLeft <= 0) {
-            reject(new Error('Too many redirects'));
-            return;
-          }
-          console.log(`Following redirect to ${res.headers.location}`);
+          if (redirectsLeft <= 0) { reject(new Error('Too many redirects')); return; }
           request(res.headers.location, redirectsLeft - 1);
           return;
         }
-
         if (res.statusCode !== 200) {
           let body = '';
           res.on('data', chunk => body += chunk);
           res.on('end', () => reject(new Error(`HTTP ${res.statusCode}: ${body.slice(0, 200)}`)));
           return;
         }
-
         let data = '';
         res.on('data', chunk => data += chunk);
         res.on('end', () => {
-          try {
-            const parsed = JSON.parse(data);
-            resolve(parsed);
-          } catch (e) {
-            reject(new Error(`Invalid JSON from Apps Script.\nFirst 500 chars:\n${data.slice(0, 500)}`));
-          }
+          try { resolve(JSON.parse(data)); } catch (e) { reject(new Error('Invalid JSON')); }
         });
       }).on('error', reject);
     }
-
     request(url, maxRedirects);
   });
 }
@@ -90,24 +76,6 @@ function slugify(title) {
     .slice(0, 80);
 }
 
-/* ---------- NEW: Auto-fix future dates ---------- */
-function normalizeDate(dateStr, postTitle) {
-  if (!dateStr) return new Date().toISOString().split('T')[0];
-  const d = new Date(dateStr);
-  const now = new Date();
-  // Reset time to midnight for clean date-only comparison
-  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  const postDate = new Date(d.getFullYear(), d.getMonth(), d.getDate());
-
-  if (postDate > today) {
-    const fixed = today.toISOString().split('T')[0];
-    console.log(`⚠️  Future date detected for "${postTitle}": ${dateStr} → auto-fixed to ${fixed}`);
-    return fixed;
-  }
-  return dateStr;
-}
-
-/* ---------- NEW: SEO Utilities ---------- */
 function toTitleCase(str) {
   if (!str) return '';
   if (str === str.toUpperCase() && str.length > 8) {
@@ -116,39 +84,13 @@ function toTitleCase(str) {
   return str;
 }
 
-function generateMetaDescription(post) {
-  if (post.excerpt && post.excerpt.length > 20) return post.excerpt.slice(0, 160);
-  const stripped = stripHtml(post.content || post.processedContent || '').slice(0, 157);
-  return stripped ? stripped + '...' : `Read ${post.title} on BoilerHealth Blogs for expert heating and boiler maintenance advice.`;
-}
-
 function readingTime(text) {
   const words = stripHtml(text).split(/\s+/).filter(w => w.length > 0).length;
   return Math.max(1, Math.ceil(words / 200));
 }
 
-function validatePost(post, index) {
-  const warnings = [];
-  if (post.title && post.title === post.title.toUpperCase() && post.title.length > 10) {
-    warnings.push(`Title is ALL CAPS. Auto-fixed for display, but change it in Apps Script for best results.`);
-  }
-  const textLen = stripHtml(post.content || '').length;
-  if (textLen < 300) {
-    warnings.push(`Content is very thin (${textLen} chars). Google prefers 800+ words.`);
-  }
-  if (!post.excerpt || post.excerpt.length < 120) {
-    warnings.push(`Excerpt too short (${post.excerpt ? post.excerpt.length : 0} chars). Aim for 120–160 characters for SEO.`);
-  } else if (post.excerpt.length > 160) {
-    warnings.push(`Excerpt too long (${post.excerpt.length} chars). Trim to 160 characters max for SEO.`);
-  }
-  if (warnings.length) {
-    console.log(`\n⚠️  Post #${index + 1} "${post.title}" warnings:`);
-    warnings.forEach(w => console.log(`   • ${w}`));
-  }
-}
-
 /* ============================
-   CSS
+   CSS (unchanged)
    ============================ */
 const BASE_CSS = `:root{
   --bg:#fafaf9;
@@ -729,7 +671,7 @@ body{
 /* ============================
    HTML SHELL GENERATOR
    ============================ */
-function generatePage({ title, description, canonical, body, schema, cssPath, ogImage, ogType = 'website' }) {
+function generatePage({ title, description, canonical, body, cssPath, ogImage, ogType = 'website' }) {
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -754,7 +696,6 @@ function generatePage({ title, description, canonical, body, schema, cssPath, og
 
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="${cssPath}">
-${schema ? schema : ''}
 </head>
 <body>
 
@@ -799,52 +740,10 @@ ${body}
 }
 
 /* ============================
-   BUILD
+   DYNAMIC INDEX PAGE
    ============================ */
-async function build() {
-  if (!CONFIG.scriptUrl) {
-    throw new Error('APPS_SCRIPT_URL environment variable is missing. Did you add the secret in Settings > Secrets and variables > Actions?');
-  }
-
-  if (fs.existsSync(CONFIG.distDir)) {
-    fs.rmSync(CONFIG.distDir, { recursive: true });
-  }
-  fs.mkdirSync(CONFIG.postsDir, { recursive: true });
-
-  fs.writeFileSync(path.join(CONFIG.distDir, 'style.css'), BASE_CSS);
-
-  console.log('Fetching posts from Apps Script...');
-  console.log('URL:', CONFIG.scriptUrl.slice(0, 60) + '...');
-
-  const posts = await fetchJson(CONFIG.scriptUrl);
-
-  if (!Array.isArray(posts)) {
-    throw new Error('Expected array from Apps Script, got: ' + typeof posts + '\nData: ' + JSON.stringify(posts).slice(0, 200));
-  }
-
-  /* ---------- NEW: Auto-fix future dates ---------- */
-  console.log('\n--- Auto-fixing dates ---');
-  posts.forEach(post => {
-    post.date = normalizeDate(post.date, post.title);
-    if (post.lastmod) {
-      post.lastmod = normalizeDate(post.lastmod, post.title + ' (lastmod)');
-    }
-  });
-  console.log('-------------------------\n');
-
-  const sortedPosts = posts.sort((a, b) => new Date(b.date) - new Date(a.date));
-  console.log(`Fetched ${sortedPosts.length} posts`);
-
-  sortedPosts.forEach(post => {
-    post.slug = slugify(post.title);
-  });
-
-  console.log('\n--- SEO Validation ---');
-  sortedPosts.forEach((post, i) => validatePost(post, i));
-  console.log('----------------------\n');
-
-  /* ---------- INDEX PAGE ---------- */
-  const indexBody = `
+function generateDynamicIndex() {
+  const body = `
 <div class="blog-hero">
   <h1>
     <span class="word"><span>BoilerHealth</span></span>
@@ -862,240 +761,384 @@ async function build() {
 </div>
 
 <div class="refresh-wrap">
-  <button class="refresh-btn" onclick="location.reload()">↻ Refresh Posts</button>
+  <button class="refresh-btn" onclick="fetchPosts()">↻ Refresh Posts</button>
 </div>
 
 <div class="blog-section">
   <div id="blogGrid" class="blog-grid">
-    ${sortedPosts.map((post, idx) => `
-    <a href="post/${post.slug}.html" class="blog-card reveal-scale revealed stagger-${Math.min(idx % 6 + 1, 6)}">
-      <div class="blog-img-wrap">
-        <img class="blog-img" src="${post.image || ''}" alt="${escapeHtml(post.title)}" width="800" height="450" loading="lazy" onerror="this.style.display='none'">
-      </div>
-      <div class="blog-body">
-        <div class="blog-meta">
-          <span class="blog-category">${escapeHtml(post.category)}</span>
-          <span>${formatDate(post.date)}</span>
-        </div>
-        <h3>${escapeHtml(toTitleCase(post.title))}</h3>
-        <p>${escapeHtml(post.excerpt)}</p>
-        <span class="read-more">Read Article →</span>
-      </div>
-    </a>
-    `).join('')}
+    <div class="loading">Loading posts...</div>
   </div>
 </div>
 
 <script>
-const allPosts = ${JSON.stringify(sortedPosts)};
-function filterPosts(category) {
-  document.querySelectorAll('.filter-btn').forEach(btn => btn.classList.remove('active'));
-  if(event && event.target) event.target.classList.add('active');
+const APPS_SCRIPT_URL = '${CONFIG.scriptUrl}';
+
+function escapeHtml(text) {
+  if (!text) return '';
+  return String(text)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}
+
+function formatDate(dateStr) {
+  const d = new Date(dateStr);
+  return isNaN(d) ? (dateStr || '') : d.toLocaleDateString('en-GB', {
+    day: 'numeric', month: 'long', year: 'numeric'
+  });
+}
+
+function slugify(title) {
+  return title
+    .toLowerCase()
+    .replace(/[^a-z0-9\\s-]/g, '')
+    .trim()
+    .replace(/\\s+/g, '-')
+    .replace(/-+/g, '-')
+    .slice(0, 80);
+}
+
+function toTitleCase(str) {
+  if (!str) return '';
+  if (str === str.toUpperCase() && str.length > 8) {
+    return str.toLowerCase().replace(/\\b\\w/g, c => c.toUpperCase());
+  }
+  return str;
+}
+
+let allPosts = [];
+
+async function fetchPosts() {
   const grid = document.getElementById('blogGrid');
-  const filtered = category === 'all' ? allPosts : allPosts.filter(p => p.category === category);
-  grid.innerHTML = filtered.map((post, idx) => \`
-    <a href="post/\${post.slug}.html" class="blog-card reveal-scale revealed stagger-\${Math.min(idx % 6 + 1, 6)}">
+  grid.innerHTML = '<div class="loading">Loading posts...</div>';
+
+  try {
+    let posts;
+    try {
+      // Try direct fetch first
+      const res = await fetch(APPS_SCRIPT_URL, { headers: { 'Accept': 'application/json' } });
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      posts = await res.json();
+    } catch (directErr) {
+      // Fallback: CORS proxy
+      console.log('Direct fetch failed, trying CORS proxy...');
+      const proxyRes = await fetch('https://api.allorigins.win/get?url=' + encodeURIComponent(APPS_SCRIPT_URL));
+      const proxyData = await proxyRes.json();
+      posts = JSON.parse(proxyData.contents);
+    }
+
+    if (!Array.isArray(posts)) throw new Error('Invalid data format');
+
+    // Normalize dates
+    const now = new Date();
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    posts.forEach(post => {
+      if (post.date) {
+        const d = new Date(post.date);
+        const postDate = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+        if (postDate > today) post.date = today.toISOString().split('T')[0];
+      }
+      post.slug = slugify(post.title);
+    });
+
+    posts.sort((a, b) => new Date(b.date || 0) - new Date(a.date || 0));
+    allPosts = posts;
+    renderPosts(allPosts);
+
+  } catch (err) {
+    console.error(err);
+    grid.innerHTML = \`
+      <div class="error">
+        Failed to load posts: \${escapeHtml(err.message)}<br>
+        <button onclick="fetchPosts()">Try Again</button>
+      </div>\`;
+  }
+}
+
+function renderPosts(posts) {
+  const grid = document.getElementById('blogGrid');
+  if (!posts.length) {
+    grid.innerHTML = '<div class="loading">No posts found.</div>';
+    return;
+  }
+  grid.innerHTML = posts.map((post, idx) => \`
+    <a href="post.html?slug=\${post.slug}" class="blog-card reveal-scale revealed stagger-\${Math.min(idx % 6 + 1, 6)}">
       <div class="blog-img-wrap">
-        <img class="blog-img" src="\${post.image || ''}" alt="\${post.title.replace(/"/g,'&quot;')}" width="800" height="450" loading="lazy" onerror="this.style.display='none'">
+        <img class="blog-img" src="\${post.image || ''}" alt="\${escapeHtml(post.title)}" width="800" height="450" loading="lazy" onerror="this.style.display='none'">
       </div>
       <div class="blog-body">
         <div class="blog-meta">
-          <span class="blog-category">\${post.category}</span>
-          <span>\${new Date(post.date).toLocaleDateString('en-GB',{day:'numeric',month:'long',year:'numeric'})}</span>
+          <span class="blog-category">\${escapeHtml(post.category)}</span>
+          <span>\${formatDate(post.date)}</span>
         </div>
-        <h3>\${post.title}</h3>
-        <p>\${post.excerpt}</p>
+        <h3>\${escapeHtml(toTitleCase(post.title))}</h3>
+        <p>\${escapeHtml(post.excerpt)}</p>
         <span class="read-more">Read Article →</span>
       </div>
     </a>
   \`).join('');
 }
+
+function filterPosts(category) {
+  document.querySelectorAll('.filter-btn').forEach(btn => btn.classList.remove('active'));
+  if(event && event.target) event.target.classList.add('active');
+  const filtered = category === 'all' ? allPosts : allPosts.filter(p => p.category === category);
+  renderPosts(filtered);
+}
+
+fetchPosts();
 </script>
 `;
+  return generatePage({
+    title: 'BoilerHealth Blogs | Tips, Maintenance & Safety',
+    description: 'Expert boiler maintenance tips, safety guides, and efficiency advice from BoilerHealth.',
+    canonical: CONFIG.siteUrl + '/index.html',
+    body: body,
+    cssPath: './style.css',
+    ogType: 'website'
+  });
+}
 
-  const indexSchema = JSON.stringify({
-    "@context": "https://schema.org",
-    "@type": "Blog",
-    "name": "BoilerHealth Blogs",
-    "description": "Expert boiler maintenance tips, safety guides, and efficiency advice.",
-    "url": CONFIG.siteUrl + '/index.html',
-    "blogPost": sortedPosts.map(post => ({
-      "@type": "BlogPosting",
-      "headline": toTitleCase(post.title),
-      "description": generateMetaDescription(post),
-      "image": post.image || undefined,
-      "datePublished": post.date,
-      "url": `${CONFIG.siteUrl}/post/${post.slug}.html`,
-      "articleSection": post.category
-    }))
-  }, null, 2);
-
-  fs.writeFileSync(
-    path.join(CONFIG.distDir, 'index.html'),
-    generatePage({
-      title: 'BoilerHealth Blogs | Tips, Maintenance & Safety',
-      description: 'Expert boiler maintenance tips, safety guides, and efficiency advice from BoilerHealth.',
-      canonical: CONFIG.siteUrl + '/index.html',
-      body: indexBody,
-      schema: `<script type="application/ld+json">${indexSchema}</script>`,
-      cssPath: './style.css',
-      ogType: 'website'
-    })
-  );
-
-  /* ---------- INDIVIDUAL POST PAGES ---------- */
-  for (let i = 0; i < sortedPosts.length; i++) {
-    const post = sortedPosts[i];
-    const displayTitle = toTitleCase(post.title);
-    const metaDesc = generateMetaDescription(post);
-    const readTime = readingTime(post.content || post.processedContent || '');
-
-    const related = sortedPosts
-      .filter((p, idx) => idx !== i && p.category === post.category)
-      .slice(0, 2);
-    const relatedPosts = related.length ? related : sortedPosts.filter((p, idx) => idx !== i).slice(0, 2);
-
-    const relatedHtml = relatedPosts.length ? `
-    <aside class="related-posts">
-      <h3>Related Articles</h3>
-      <ul>
-        ${relatedPosts.map(r => `<li><a href="${r.slug}.html">${escapeHtml(toTitleCase(r.title))}</a></li>`).join('')}
-      </ul>
-    </aside>` : '';
-
-    const postBody = `
+/* ============================
+   DYNAMIC POST PAGE
+   ============================ */
+function generateDynamicPostPage() {
+  const body = `
 <nav class="breadcrumb" aria-label="breadcrumb">
-  <a href="../index.html">All Posts</a>
+  <a href="./index.html">All Posts</a>
   <span>/</span>
-  <span>${escapeHtml(post.category)}</span>
+  <span id="bcCategory">Loading...</span>
   <span>/</span>
-  <span aria-current="page">${escapeHtml(displayTitle)}</span>
+  <span id="bcTitle" aria-current="page">Loading...</span>
 </nav>
 
 <article class="article-view active" style="display:block;">
-  <button class="back-btn" onclick="history.back()">← Back to all posts</button>
-  <img class="article-hero-img" src="${post.image || ''}" alt="${escapeHtml(displayTitle)}" width="1200" height="675" onerror="this.style.display='none'">
+  <button class="back-btn" onclick="location.href='./index.html'">← Back to all posts</button>
+  <img class="article-hero-img" id="heroImg" src="" alt="" width="1200" height="675" style="display:none;">
   <div class="article-header">
     <div class="blog-meta">
-      <span class="blog-category">${escapeHtml(post.category)}</span>
-      <span>${formatDate(post.date)}</span>
-      <span class="reading-time">⏱ ${readTime} min read</span>
+      <span class="blog-category" id="postCategory">...</span>
+      <span id="postDate">...</span>
+      <span class="reading-time" id="readTime">⏱ 1 min read</span>
     </div>
-    <h1>${escapeHtml(displayTitle)}</h1>
+    <h1 id="postTitle">Loading...</h1>
   </div>
-  <div class="article-body">
-    ${post.content || post.processedContent || '<p>No content.</p>'}
+  <div class="article-body" id="postContent">
+    <p>Loading post...</p>
   </div>
-  ${relatedHtml}
+  <aside class="related-posts" id="relatedPosts" style="display:none;">
+    <h3>Related Articles</h3>
+    <ul id="relatedList"></ul>
+  </aside>
 </article>
-`;
 
-    const postSchema = JSON.stringify({
-      "@context": "https://schema.org",
-      "@type": "BlogPosting",
-      "headline": displayTitle,
-      "description": metaDesc,
-      "image": post.image || undefined,
-      "datePublished": post.date,
-      "dateModified": post.lastmod || post.date,
-      "author": {
-        "@type": "Organization",
-        "name": "BoilerHealth"
-      },
-      "publisher": {
-        "@type": "Organization",
-        "name": "BoilerHealth"
-      },
-      "mainEntityOfPage": {
-        "@type": "WebPage",
-        "@id": `${CONFIG.siteUrl}/post/${post.slug}.html`
-      }
-    }, null, 2);
+<script>
+const APPS_SCRIPT_URL = '${CONFIG.scriptUrl}';
 
-    const breadcrumbSchema = JSON.stringify({
-      "@context": "https://schema.org",
-      "@type": "BreadcrumbList",
-      "itemListElement": [
-        {
-          "@type": "ListItem",
-          "position": 1,
-          "name": "All Posts",
-          "item": `${CONFIG.siteUrl}/index.html`
-        },
-        {
-          "@type": "ListItem",
-          "position": 2,
-          "name": post.category,
-          "item": `${CONFIG.siteUrl}/index.html`
-        },
-        {
-          "@type": "ListItem",
-          "position": 3,
-          "name": displayTitle,
-          "item": `${CONFIG.siteUrl}/post/${post.slug}.html`
-        }
-      ]
-    }, null, 2);
+function escapeHtml(text) {
+  if (!text) return '';
+  return String(text)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}
 
-    const postPath = path.join(CONFIG.postsDir, `${post.slug}.html`);
-    fs.writeFileSync(
-      postPath,
-      generatePage({
-        title: `${displayTitle} | BoilerHealth Blogs`,
-        description: metaDesc,
-        canonical: `${CONFIG.siteUrl}/post/${post.slug}.html`,
-        body: postBody,
-        schema: `<script type="application/ld+json">${postSchema}</script>\n<script type="application/ld+json">${breadcrumbSchema}</script>`,
-        cssPath: '../style.css',
-        ogImage: post.image,
-        ogType: 'article'
-      })
-    );
-    console.log(`  Wrote post: ${post.slug}.html`);
+function formatDate(dateStr) {
+  const d = new Date(dateStr);
+  return isNaN(d) ? (dateStr || '') : d.toLocaleDateString('en-GB', {
+    day: 'numeric', month: 'long', year: 'numeric'
+  });
+}
+
+function slugify(title) {
+  return title
+    .toLowerCase()
+    .replace(/[^a-z0-9\\s-]/g, '')
+    .trim()
+    .replace(/\\s+/g, '-')
+    .replace(/-+/g, '-')
+    .slice(0, 80);
+}
+
+function toTitleCase(str) {
+  if (!str) return '';
+  if (str === str.toUpperCase() && str.length > 8) {
+    return str.toLowerCase().replace(/\\b\\w/g, c => c.toUpperCase());
   }
+  return str;
+}
+
+function stripHtml(html) {
+  if (!html) return '';
+  return html.replace(/<[^>]*>/g, ' ').replace(/\\s+/g, ' ').trim();
+}
+
+function readingTime(text) {
+  const words = stripHtml(text).split(/\\s+/).filter(w => w.length > 0).length;
+  return Math.max(1, Math.ceil(words / 200));
+}
+
+async function loadPost() {
+  const params = new URLSearchParams(window.location.search);
+  const targetSlug = params.get('slug');
+
+  if (!targetSlug) {
+    document.getElementById('postContent').innerHTML = '<p>No post specified.</p>';
+    return;
+  }
+
+  try {
+    let posts;
+    try {
+      const res = await fetch(APPS_SCRIPT_URL, { headers: { 'Accept': 'application/json' } });
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      posts = await res.json();
+    } catch (directErr) {
+      console.log('Direct fetch failed, trying CORS proxy...');
+      const proxyRes = await fetch('https://api.allorigins.win/get?url=' + encodeURIComponent(APPS_SCRIPT_URL));
+      const proxyData = await proxyRes.json();
+      posts = JSON.parse(proxyData.contents);
+    }
+
+    if (!Array.isArray(posts)) throw new Error('Invalid data');
+
+    posts.forEach(p => { p.slug = slugify(p.title); });
+    posts.sort((a, b) => new Date(b.date || 0) - new Date(a.date || 0));
+
+    const post = posts.find(p => p.slug === targetSlug);
+    if (!post) {
+      document.getElementById('postContent').innerHTML = '<p>Post not found.</p>';
+      return;
+    }
+
+    document.title = \`\${toTitleCase(post.title)} | BoilerHealth Blogs\`;
+    document.querySelector('meta[name="description"]').content = post.excerpt || \`Read \${post.title} on BoilerHealth Blogs.\`;
+
+    document.getElementById('postTitle').textContent = toTitleCase(post.title);
+    document.getElementById('postCategory').textContent = post.category;
+    document.getElementById('postDate').textContent = formatDate(post.date);
+    document.getElementById('bcCategory').textContent = post.category;
+    document.getElementById('bcTitle').textContent = toTitleCase(post.title);
+    document.getElementById('readTime').textContent = \`⏱ \${readingTime(post.content || post.processedContent || '')} min read\`;
+
+    const contentDiv = document.getElementById('postContent');
+    contentDiv.innerHTML = post.content || post.processedContent || '<p>No content.</p>';
+
+    if (post.image) {
+      const img = document.getElementById('heroImg');
+      img.src = post.image;
+      img.alt = post.title;
+      img.style.display = 'block';
+      img.onerror = () => { img.style.display = 'none'; };
+    }
+
+    const related = posts.filter(p => p.slug !== targetSlug && p.category === post.category).slice(0, 2);
+    if (related.length) {
+      document.getElementById('relatedPosts').style.display = 'block';
+      document.getElementById('relatedList').innerHTML = related.map(r => \`
+        <li><a href="post.html?slug=\${r.slug}">\${escapeHtml(toTitleCase(r.title))}</a></li>
+      \`).join('');
+    }
+
+  } catch (err) {
+    console.error(err);
+    document.getElementById('postContent').innerHTML = \`<p>Error loading post: \${escapeHtml(err.message)}</p>\`;
+  }
+}
+
+loadPost();
+</script>
+`;
+  return generatePage({
+    title: 'BoilerHealth Blogs',
+    description: 'Read expert boiler maintenance tips and advice on BoilerHealth Blogs.',
+    canonical: CONFIG.siteUrl + '/post.html',
+    body: body,
+    cssPath: './style.css',
+    ogType: 'article'
+  });
+}
+
+/* ============================
+   BUILD
+   ============================ */
+async function build() {
+  if (!CONFIG.scriptUrl) {
+    throw new Error('APPS_SCRIPT_URL environment variable is missing.');
+  }
+
+  if (fs.existsSync(CONFIG.distDir)) {
+    fs.rmSync(CONFIG.distDir, { recursive: true });
+  }
+  fs.mkdirSync(CONFIG.postsDir, { recursive: true });
+
+  fs.writeFileSync(path.join(CONFIG.distDir, 'style.css'), BASE_CSS);
+
+  console.log('Fetching posts for final sitemap...');
+  const posts = await fetchJson(CONFIG.scriptUrl);
+  if (!Array.isArray(posts)) throw new Error('Expected array from Apps Script');
+
+  posts.forEach(post => { post.slug = slugify(post.title); });
+  posts.sort((a, b) => new Date(b.date) - new Date(a.date));
+  console.log(`Fetched ${posts.length} posts for sitemap`);
+
+  /* ---------- DYNAMIC INDEX ---------- */
+  fs.writeFileSync(
+    path.join(CONFIG.distDir, 'index.html'),
+    generateDynamicIndex()
+  );
+  console.log('  Wrote dynamic index.html');
+
+  /* ---------- DYNAMIC POST VIEWER ---------- */
+  fs.writeFileSync(
+    path.join(CONFIG.distDir, 'post.html'),
+    generateDynamicPostPage()
+  );
+  console.log('  Wrote dynamic post.html');
 
   /* ---------- SITEMAP.XML ---------- */
-  function formatSitemapDate(dateStr) {
-    if (!dateStr) return new Date().toISOString().split('T')[0];
-    const d = new Date(dateStr);
-    return isNaN(d) ? String(dateStr).slice(0, 10) : d.toISOString().split('T')[0];
-  }
-
   const baseUrl = CONFIG.siteUrl.replace(/\/$/, '');
   const today = new Date().toISOString().split('T')[0];
-
-  const sitemap = `<?xml version="1.0" encoding="UTF-8"?>
+  const sitemap = \`<?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
   <url>
-    <loc>${baseUrl}/index.html</loc>
-    <lastmod>${today}</lastmod>
+    <loc>\${baseUrl}/index.html</loc>
+    <lastmod>\${today}</lastmod>
     <changefreq>daily</changefreq>
     <priority>1.0</priority>
-  </url>${sortedPosts.map(post => `
+  </url>
   <url>
-    <loc>${baseUrl}/post/${post.slug}.html</loc>
-    <lastmod>${formatSitemapDate(post.lastmod || post.date)}</lastmod>
+    <loc>\${baseUrl}/post.html</loc>
+    <lastmod>\${today}</lastmod>
+    <changefreq>daily</changefreq>
+    <priority>0.9</priority>
+  </url>\${posts.map(post => \`
+  <url>
+    <loc>\${baseUrl}/post.html?slug=\${post.slug}</loc>
+    <lastmod>\${post.date ? new Date(post.date).toISOString().split('T')[0] : today}</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.8</priority>
-  </url>`).join('')}
-</urlset>`;
-
+  </url>\`).join('')}
+</urlset>\`;
   fs.writeFileSync(path.join(CONFIG.distDir, 'sitemap.xml'), sitemap);
 
   /* ---------- ROBOTS.TXT ---------- */
-  const robots = `User-agent: *
+  const robots = \`User-agent: *
 Allow: /
-Sitemap: ${baseUrl}/sitemap.xml`;
-
+Sitemap: \${baseUrl}/sitemap.xml\`;
   fs.writeFileSync(path.join(CONFIG.distDir, 'robots.txt'), robots);
 
-  console.log(`✅ Build complete:
-  - ${sortedPosts.length} post pages
-  - 1 index page
-  - sitemap.xml (${sortedPosts.length + 1} URLs)
+  console.log(\`✅ Build complete:
+  - Dynamic index.html (fetches live from Apps Script)
+  - Dynamic post.html (fetches live from Apps Script)
+  - sitemap.xml (\${posts.length + 2} URLs)
   - robots.txt
   - style.css
-  - SEO features: auto meta, schema, breadcrumbs, related posts, OG tags, auto future-date fix`);
+  From now on, just edit your Google Sheet and refresh the website. No more builds!\`);
 }
 
 build().catch(err => {
