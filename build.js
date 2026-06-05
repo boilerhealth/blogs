@@ -1,19 +1,63 @@
 const fs = require('fs');
 const path = require('path');
+const https = require('https');
 
 /* ============================
    CONFIG
    ============================ */
 const CONFIG = {
-  sheetId: '1qFukis10IjqITkoA3pil9rNhJUZjX2yqpCSQYPLgWLI',
-  sheetName: 'Posts',
+  scriptUrl: process.env.APPS_SCRIPT_URL,
   siteUrl: process.env.SITE_URL || 'https://boilerhealth.github.io/blogs',
-  distDir: './dist'
+  distDir: './dist',
+  postsDir: './dist/post'
 };
 
 /* ============================
    UTILITIES
    ============================ */
+
+function fetchJson(url) {
+  return new Promise((resolve, reject) => {
+    const maxRedirects = 5;
+
+    function request(targetUrl, redirectsLeft) {
+      const client = targetUrl.startsWith('https:') ? https : require('http');
+
+      client.get(targetUrl, { headers: { 'Accept': 'application/json' } }, (res) => {
+        if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+          if (redirectsLeft <= 0) {
+            reject(new Error('Too many redirects'));
+            return;
+          }
+          console.log(`Following redirect to ${res.headers.location}`);
+          request(res.headers.location, redirectsLeft - 1);
+          return;
+        }
+
+        if (res.statusCode !== 200) {
+          let body = '';
+          res.on('data', chunk => body += chunk);
+          res.on('end', () => reject(new Error(`HTTP ${res.statusCode}: ${body.slice(0, 200)}`)));
+          return;
+        }
+
+        let data = '';
+        res.on('data', chunk => data += chunk);
+        res.on('end', () => {
+          try {
+            const parsed = JSON.parse(data);
+            resolve(parsed);
+          } catch (e) {
+            reject(new Error(`Invalid JSON from Apps Script.\nFirst 500 chars:\n${data.slice(0, 500)}`));
+          }
+        });
+      }).on('error', reject);
+    }
+
+    request(url, maxRedirects);
+  });
+}
+
 function escapeHtml(text) {
   if (!text) return '';
   return String(text)
@@ -22,6 +66,11 @@ function escapeHtml(text) {
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#039;');
+}
+
+function stripHtml(html) {
+  if (!html) return '';
+  return html.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
 }
 
 function formatDate(dateStr) {
@@ -41,12 +90,59 @@ function slugify(title) {
     .slice(0, 80);
 }
 
+/* ---------- NEW: Auto-fix future dates ---------- */
+function normalizeDate(dateStr, postTitle) {
+  if (!dateStr) return new Date().toISOString().split('T')[0];
+  const d = new Date(dateStr);
+  const now = new Date();
+  // Reset time to midnight for clean date-only comparison
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const postDate = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+
+  if (postDate > today) {
+    const fixed = today.toISOString().split('T')[0];
+    console.log(`⚠️  Future date detected for "${postTitle}": ${dateStr} → auto-fixed to ${fixed}`);
+    return fixed;
+  }
+  return dateStr;
+}
+
+/* ---------- NEW: SEO Utilities ---------- */
 function toTitleCase(str) {
   if (!str) return '';
   if (str === str.toUpperCase() && str.length > 8) {
-    return str.toLowerCase().replace(/\b\w/g, c => c.toUpperCase());
+    return str.toLowerCase().replace(/\w/g, c => c.toUpperCase());
   }
   return str;
+}
+
+function generateMetaDescription(post) {
+  if (post.excerpt && post.excerpt.length > 20) return post.excerpt.slice(0, 160);
+  const stripped = stripHtml(post.content || post.processedContent || '').slice(0, 157);
+  return stripped ? stripped + '...' : `Read ${post.title} on BoilerHealth Blogs for expert heating and boiler maintenance advice.`;
+}
+
+function readingTime(text) {
+  const words = stripHtml(text).split(/\s+/).filter(w => w.length > 0).length;
+  return Math.max(1, Math.ceil(words / 200));
+}
+
+function validatePost(post, index) {
+  const warnings = [];
+  if (post.title && post.title === post.title.toUpperCase() && post.title.length > 10) {
+    warnings.push(`Title is ALL CAPS. Auto-fixed for display, but change it in Apps Script for best results.`);
+  }
+  const textLen = stripHtml(post.content || '').length;
+  if (textLen < 300) {
+    warnings.push(`Content is very thin (${textLen} chars). Google prefers 800+ words.`);
+  }
+  if (!post.excerpt || post.excerpt.length < 20) {
+    warnings.push(`Missing excerpt. Meta description auto-generated from content.`);
+  }
+  if (warnings.length) {
+    console.log(`\n⚠️  Post #${index + 1} "${post.title}" warnings:`);
+    warnings.forEach(w => console.log(`   • ${w}`));
+  }
 }
 
 /* ============================
@@ -346,7 +442,6 @@ body{
 .blog-img-wrap{
   width:100%;
   height:220px;
-  aspect-ratio:16/9;
   overflow:hidden;
   position:relative;
   background:var(--bg-warm);
@@ -488,7 +583,6 @@ body{
 .article-hero-img{
   width:100%;
   height:400px;
-  aspect-ratio:16/9;
   object-fit:cover;
   border-radius:var(--radius);
   margin-bottom:40px;
@@ -623,7 +717,7 @@ body{
   .filters{padding:0 20px}
   .blog-section{padding:0 20px 40px}
   .article-view{padding:0 20px;margin-top:24px}
-  .article-hero-img{height:240px;aspect-ratio:16/9}
+  .article-hero-img{height:240px}
   .article-header h1{font-size:28px}
   .breadcrumb{padding:0 20px}
 }`;
@@ -631,7 +725,7 @@ body{
 /* ============================
    HTML SHELL GENERATOR
    ============================ */
-function generatePage({ title, description, canonical, body, cssPath, ogImage, ogType = 'website' }) {
+function generatePage({ title, description, canonical, body, schema, cssPath, ogImage, ogType = 'website' }) {
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -656,6 +750,7 @@ function generatePage({ title, description, canonical, body, cssPath, ogImage, o
 
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="${cssPath}">
+${schema ? schema : ''}
 </head>
 <body>
 
@@ -700,457 +795,41 @@ ${body}
 }
 
 /* ============================
-   DYNAMIC INDEX PAGE
-   ============================ */
-function generateDynamicIndex() {
-  // Use CSV export - NO CORS issues, instant updates
-  const csvUrl = `https://docs.google.com/spreadsheets/d/${CONFIG.sheetId}/gviz/tq?tqx=out:csv&sheet=${CONFIG.sheetName}`;
-
-  const body = `
-<div class="blog-hero">
-  <h1>
-    <span class="word"><span>BoilerHealth</span></span>
-    <span class="word"><span><strong>Blogs</strong></span></span>
-  </h1>
-  <p>Keep your boiler running efficiently all year round.</p>
-</div>
-
-<div class="filters">
-  <button class="filter-btn active" onclick="filterPosts('all')">All Posts</button>
-  <button class="filter-btn" onclick="filterPosts('Maintenance')">Maintenance</button>
-  <button class="filter-btn" onclick="filterPosts('Safety')">Safety</button>
-  <button class="filter-btn" onclick="filterPosts('Tips')">Tips</button>
-  <button class="filter-btn" onclick="filterPosts('News')">News</button>
-</div>
-
-<div class="refresh-wrap">
-  <button class="refresh-btn" onclick="fetchPosts()">↻ Refresh Posts</button>
-</div>
-
-<div class="blog-section">
-  <div id="blogGrid" class="blog-grid">
-    <div class="loading">Loading posts...</div>
-  </div>
-</div>
-
-<script>
-const CSV_URL = '${csvUrl}';
-
-function escapeHtml(text) {
-  if (!text) return '';
-  return String(text)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#039;');
-}
-
-function formatDate(dateStr) {
-  const d = new Date(dateStr);
-  return isNaN(d) ? (dateStr || '') : d.toLocaleDateString('en-GB', {
-    day: 'numeric', month: 'long', year: 'numeric'
-  });
-}
-
-function slugify(title) {
-  return title
-    .toLowerCase()
-    .replace(/[^a-z0-9\\s-]/g, '')
-    .trim()
-    .replace(/\\s+/g, '-')
-    .replace(/-+/g, '-')
-    .slice(0, 80);
-}
-
-function toTitleCase(str) {
-  if (!str) return '';
-  if (str === str.toUpperCase() && str.length > 8) {
-    return str.toLowerCase().replace(/\\b\\w/g, c => c.toUpperCase());
-  }
-  return str;
-}
-
-// Parse CSV properly (handles commas inside quotes)
-function parseCSV(csvText) {
-  const lines = csvText.trim().split('\\n');
-  const headers = parseCSVLine(lines[0]);
-  
-  return lines.slice(1).map(line => {
-    const values = parseCSVLine(line);
-    const obj = {};
-    headers.forEach((h, i) => {
-      obj[h] = values[i] || '';
-    });
-    return obj;
-  });
-}
-
-function parseCSVLine(line) {
-  const result = [];
-  let current = '';
-  let inQuotes = false;
-  
-  for (let i = 0; i < line.length; i++) {
-    const char = line[i];
-    const nextChar = line[i + 1];
-    
-    if (char === '"') {
-      if (inQuotes && nextChar === '"') {
-        current += '"';
-        i++; // skip next quote
-      } else {
-        inQuotes = !inQuotes;
-      }
-    } else if (char === ',' && !inQuotes) {
-      result.push(current.trim());
-      current = '';
-    } else {
-      current += char;
-    }
-  }
-  result.push(current.trim());
-  return result;
-}
-
-let allPosts = [];
-
-async function fetchPosts() {
-  const grid = document.getElementById('blogGrid');
-  grid.innerHTML = '<div class="loading">Loading posts...</div>';
-
-  try {
-    const res = await fetch(CSV_URL);
-    if (!res.ok) throw new Error('HTTP ' + res.status);
-    
-    const csvText = await res.text();
-    const posts = parseCSV(csvText);
-
-    if (!posts.length) throw new Error('No posts found');
-
-    // Normalize dates and generate slugs
-    const now = new Date();
-    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-    posts.forEach(post => {
-      if (post.date) {
-        const d = new Date(post.date);
-        const postDate = new Date(d.getFullYear(), d.getMonth(), d.getDate());
-        if (postDate > today) post.date = today.toISOString().split('T')[0];
-      }
-      post.slug = slugify(post.title);
-    });
-
-    posts.sort((a, b) => new Date(b.date || 0) - new Date(a.date || 0));
-    allPosts = posts;
-    renderPosts(allPosts);
-
-  } catch (err) {
-    console.error(err);
-    grid.innerHTML = \`
-      <div class="error">
-        Failed to load posts: \${escapeHtml(err.message)}<br>
-        <small>Make sure your Google Sheet is published to web</small><br>
-        <button onclick="fetchPosts()">Try Again</button>
-      </div>\`;
-  }
-}
-
-function renderPosts(posts) {
-  const grid = document.getElementById('blogGrid');
-  if (!posts.length) {
-    grid.innerHTML = '<div class="loading">No posts found.</div>';
-    return;
-  }
-  grid.innerHTML = posts.map((post, idx) => \`
-    <a href="post.html?slug=\${post.slug}" class="blog-card reveal-scale revealed stagger-\${Math.min(idx % 6 + 1, 6)}">
-      <div class="blog-img-wrap">
-        <img class="blog-img" src="\${post.image || ''}" alt="\${escapeHtml(post.title)}" width="800" height="450" loading="lazy" onerror="this.style.display='none'">
-      </div>
-      <div class="blog-body">
-        <div class="blog-meta">
-          <span class="blog-category">\${escapeHtml(post.category)}</span>
-          <span>\${formatDate(post.date)}</span>
-        </div>
-        <h3>\${escapeHtml(toTitleCase(post.title))}</h3>
-        <p>\${escapeHtml(post.excerpt)}</p>
-        <span class="read-more">Read Article →</span>
-      </div>
-    </a>
-  \`).join('');
-}
-
-function filterPosts(category) {
-  document.querySelectorAll('.filter-btn').forEach(btn => btn.classList.remove('active'));
-  if(event && event.target) event.target.classList.add('active');
-  const filtered = category === 'all' ? allPosts : allPosts.filter(p => p.category === category);
-  renderPosts(filtered);
-}
-
-fetchPosts();
-</script>
-`;
-  return generatePage({
-    title: 'BoilerHealth Blogs | Tips, Maintenance & Safety',
-    description: 'Expert boiler maintenance tips, safety guides, and efficiency advice from BoilerHealth.',
-    canonical: CONFIG.siteUrl + '/index.html',
-    body: body,
-    cssPath: './style.css',
-    ogType: 'website'
-  });
-}
-
-/* ============================
-   DYNAMIC POST PAGE
-   ============================ */
-function generateDynamicPostPage() {
-  const csvUrl = `https://docs.google.com/spreadsheets/d/${CONFIG.sheetId}/gviz/tq?tqx=out:csv&sheet=${CONFIG.sheetName}`;
-
-  const body = `
-<nav class="breadcrumb" aria-label="breadcrumb">
-  <a href="./index.html">All Posts</a>
-  <span>/</span>
-  <span id="bcCategory">Loading...</span>
-  <span>/</span>
-  <span id="bcTitle" aria-current="page">Loading...</span>
-</nav>
-
-<article class="article-view active" style="display:block;">
-  <button class="back-btn" onclick="location.href='./index.html'">← Back to all posts</button>
-  <img class="article-hero-img" id="heroImg" src="" alt="" width="1200" height="675" style="display:none;">
-  <div class="article-header">
-    <div class="blog-meta">
-      <span class="blog-category" id="postCategory">...</span>
-      <span id="postDate">...</span>
-      <span class="reading-time" id="readTime">⏱ 1 min read</span>
-    </div>
-    <h1 id="postTitle">Loading...</h1>
-  </div>
-  <div class="article-body" id="postContent">
-    <p>Loading post...</p>
-  </div>
-  <aside class="related-posts" id="relatedPosts" style="display:none;">
-    <h3>Related Articles</h3>
-    <ul id="relatedList"></ul>
-  </aside>
-</article>
-
-<script>
-const CSV_URL = '${csvUrl}';
-
-function escapeHtml(text) {
-  if (!text) return '';
-  return String(text)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#039;');
-}
-
-function formatDate(dateStr) {
-  const d = new Date(dateStr);
-  return isNaN(d) ? (dateStr || '') : d.toLocaleDateString('en-GB', {
-    day: 'numeric', month: 'long', year: 'numeric'
-  });
-}
-
-function slugify(title) {
-  return title
-    .toLowerCase()
-    .replace(/[^a-z0-9\\s-]/g, '')
-    .trim()
-    .replace(/\\s+/g, '-')
-    .replace(/-+/g, '-')
-    .slice(0, 80);
-}
-
-function toTitleCase(str) {
-  if (!str) return '';
-  if (str === str.toUpperCase() && str.length > 8) {
-    return str.toLowerCase().replace(/\\b\\w/g, c => c.toUpperCase());
-  }
-  return str;
-}
-
-function stripHtml(html) {
-  if (!html) return '';
-  return html.replace(/<[^>]*>/g, ' ').replace(/\\s+/g, ' ').trim();
-}
-
-function readingTime(text) {
-  const words = stripHtml(text).split(/\\s+/).filter(w => w.length > 0).length;
-  return Math.max(1, Math.ceil(words / 200));
-}
-
-function parseCSV(csvText) {
-  const lines = csvText.trim().split('\\n');
-  const headers = parseCSVLine(lines[0]);
-  return lines.slice(1).map(line => {
-    const values = parseCSVLine(line);
-    const obj = {};
-    headers.forEach((h, i) => obj[h] = values[i] || '');
-    return obj;
-  });
-}
-
-function parseCSVLine(line) {
-  const result = [];
-  let current = '';
-  let inQuotes = false;
-  for (let i = 0; i < line.length; i++) {
-    const char = line[i];
-    const nextChar = line[i + 1];
-    if (char === '"') {
-      if (inQuotes && nextChar === '"') {
-        current += '"';
-        i++;
-      } else {
-        inQuotes = !inQuotes;
-      }
-    } else if (char === ',' && !inQuotes) {
-      result.push(current.trim());
-      current = '';
-    } else {
-      current += char;
-    }
-  }
-  result.push(current.trim());
-  return result;
-}
-
-async function loadPost() {
-  const params = new URLSearchParams(window.location.search);
-  const targetSlug = params.get('slug');
-
-  if (!targetSlug) {
-    document.getElementById('postContent').innerHTML = '<p>No post specified.</p>';
-    return;
-  }
-
-  try {
-    const res = await fetch(CSV_URL);
-    if (!res.ok) throw new Error('HTTP ' + res.status);
-    
-    const csvText = await res.text();
-    const posts = parseCSV(csvText);
-
-    posts.forEach(p => { p.slug = slugify(p.title); });
-    posts.sort((a, b) => new Date(b.date || 0) - new Date(a.date || 0));
-
-    const post = posts.find(p => p.slug === targetSlug);
-    if (!post) {
-      document.getElementById('postContent').innerHTML = '<p>Post not found.</p>';
-      return;
-    }
-
-    document.title = \`\${toTitleCase(post.title)} | BoilerHealth Blogs\`;
-    document.querySelector('meta[name="description"]').content = post.excerpt || \`Read \${post.title} on BoilerHealth Blogs.\`;
-
-    document.getElementById('postTitle').textContent = toTitleCase(post.title);
-    document.getElementById('postCategory').textContent = post.category;
-    document.getElementById('postDate').textContent = formatDate(post.date);
-    document.getElementById('bcCategory').textContent = post.category;
-    document.getElementById('bcTitle').textContent = toTitleCase(post.title);
-    document.getElementById('readTime').textContent = \`⏱ \${readingTime(post.content || post.processedContent || '')} min read\`;
-
-    const contentDiv = document.getElementById('postContent');
-    contentDiv.innerHTML = post.content || post.processedContent || '<p>No content.</p>';
-
-    if (post.image) {
-      const img = document.getElementById('heroImg');
-      img.src = post.image;
-      img.alt = post.title;
-      img.style.display = 'block';
-      img.onerror = () => { img.style.display = 'none'; };
-    }
-
-    const related = posts.filter(p => p.slug !== targetSlug && p.category === post.category).slice(0, 2);
-    if (related.length) {
-      document.getElementById('relatedPosts').style.display = 'block';
-      document.getElementById('relatedList').innerHTML = related.map(r => \`
-        <li><a href="post.html?slug=\${r.slug}">\${escapeHtml(toTitleCase(r.title))}</a></li>
-      \`).join('');
-    }
-
-  } catch (err) {
-    console.error(err);
-    document.getElementById('postContent').innerHTML = \`<p>Error loading post: \${escapeHtml(err.message)}</p>\`;
-  }
-}
-
-loadPost();
-</script>
-`;
-  return generatePage({
-    title: 'BoilerHealth Blogs',
-    description: 'Read expert boiler maintenance tips and advice on BoilerHealth Blogs.',
-    canonical: CONFIG.siteUrl + '/post.html',
-    body: body,
-    cssPath: './style.css',
-    ogType: 'article'
-  });
-}
-
-/* ============================
    BUILD
    ============================ */
-function build() {
-  if (!CONFIG.sheetId) {
-    throw new Error('Sheet ID is missing in CONFIG.');
+async function build() {
+  if (!CONFIG.scriptUrl) {
+    throw new Error('APPS_SCRIPT_URL environment variable is missing. Did you add the secret in Settings > Secrets and variables > Actions?');
   }
 
   if (fs.existsSync(CONFIG.distDir)) {
     fs.rmSync(CONFIG.distDir, { recursive: true });
   }
-  fs.mkdirSync(CONFIG.distDir, { recursive: true });
+  fs.mkdirSync(CONFIG.postsDir, { recursive: true });
 
   fs.writeFileSync(path.join(CONFIG.distDir, 'style.css'), BASE_CSS);
 
-  console.log('Generating dynamic site...');
+  console.log('Fetching posts from Apps Script...');
+  console.log('URL:', CONFIG.scriptUrl.slice(0, 60) + '...');
 
-  fs.writeFileSync(
-    path.join(CONFIG.distDir, 'index.html'),
-    generateDynamicIndex()
-  );
-  console.log('  Wrote dynamic index.html');
+  const posts = await fetchJson(CONFIG.scriptUrl);
 
-  fs.writeFileSync(
-    path.join(CONFIG.distDir, 'post.html'),
-    generateDynamicPostPage()
-  );
-  console.log('  Wrote dynamic post.html');
+  if (!Array.isArray(posts)) {
+    throw new Error('Expected array from Apps Script, got: ' + typeof posts + '\nData: ' + JSON.stringify(posts).slice(0, 200));
+  }
 
-  const baseUrl = CONFIG.siteUrl.replace(/\/$/, '');
-  const today = new Date().toISOString().split('T')[0];
-  const sitemap = `<?xml version="1.0" encoding="UTF-8"?>
-<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
-  <url>
-    <loc>${baseUrl}/index.html</loc>
-    <lastmod>${today}</lastmod>
-    <changefreq>daily</changefreq>
-    <priority>1.0</priority>
-  </url>
-  <url>
-    <loc>${baseUrl}/post.html</loc>
-    <lastmod>${today}</lastmod>
-    <changefreq>daily</changefreq>
-    <priority>0.9</priority>
-  </url>
-</urlset>`;
-  fs.writeFileSync(path.join(CONFIG.distDir, 'sitemap.xml'), sitemap);
+  /* ---------- NEW: Auto-fix future dates ---------- */
+  console.log('\n--- Auto-fixing dates ---');
+  posts.forEach(post => {
+    post.date = normalizeDate(post.date, post.title);
+    if (post.lastmod) {
+      post.lastmod = normalizeDate(post.lastmod, post.title + ' (lastmod)');
+    }
+  });
+  console.log('-------------------------\n');
 
-  const robots = `User-agent: *
-Allow: /
-Sitemap: ${baseUrl}/sitemap.xml`;
-  fs.writeFileSync(path.join(CONFIG.distDir, 'robots.txt'), robots);
+  const sortedPosts = posts.sort((a, b) => new Date(b.date) - new Date(a.date));
+  console.log(`Fetched ${sortedPosts.length} posts`);
 
-  console.log(`✅ Build complete:
-  - Dynamic index.html (fetches live CSV from Google Sheet)
-  - Dynamic post.html (fetches live CSV from Google Sheet)
-  - sitemap.xml
-  - robots.txt
-  - style.css
-  From now on, just edit your Google Sheet and refresh the website.`);
-}
-
-build();
+  sortedPosts.forEach(post => {
+    post.slug = slugi
