@@ -1,19 +1,49 @@
 const fs = require('fs');
 const path = require('path');
+const https = require('https');
 
 /* ============================
    CONFIG
    ============================ */
 const CONFIG = {
-  sheetId: '1qFukis10IjqITkoA3pil9rNhJUZjX2yqpCSQYPLgWLI',
-  sheetName: 'Posts',
+  scriptUrl: process.env.APPS_SCRIPT_URL,
   siteUrl: process.env.SITE_URL || 'https://boilerhealth.github.io/blogs',
-  distDir: './dist'
+  distDir: './docs',    // <-- GitHub Pages can serve from /docs folder
+  postsDir: './docs/post'
 };
 
 /* ============================
    UTILITIES
    ============================ */
+
+function fetchJson(url) {
+  return new Promise((resolve, reject) => {
+    const maxRedirects = 5;
+    function request(targetUrl, redirectsLeft) {
+      const client = targetUrl.startsWith('https:') ? https : require('http');
+      client.get(targetUrl, { headers: { 'Accept': 'application/json' } }, (res) => {
+        if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+          if (redirectsLeft <= 0) { reject(new Error('Too many redirects')); return; }
+          request(res.headers.location, redirectsLeft - 1);
+          return;
+        }
+        if (res.statusCode !== 200) {
+          let body = '';
+          res.on('data', chunk => body += chunk);
+          res.on('end', () => reject(new Error(`HTTP ${res.statusCode}: ${body.slice(0, 200)}`)));
+          return;
+        }
+        let data = '';
+        res.on('data', chunk => data += chunk);
+        res.on('end', () => {
+          try { resolve(JSON.parse(data)); } catch (e) { reject(new Error('Invalid JSON')); }
+        });
+      }).on('error', reject);
+    }
+    request(url, maxRedirects);
+  });
+}
+
 function escapeHtml(text) {
   if (!text) return '';
   return String(text)
@@ -22,6 +52,11 @@ function escapeHtml(text) {
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#039;');
+}
+
+function stripHtml(html) {
+  if (!html) return '';
+  return html.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
 }
 
 function formatDate(dateStr) {
@@ -49,8 +84,13 @@ function toTitleCase(str) {
   return str;
 }
 
+function readingTime(text) {
+  const words = stripHtml(text).split(/\s+/).filter(w => w.length > 0).length;
+  return Math.max(1, Math.ceil(words / 200));
+}
+
 /* ============================
-   CSS
+   CSS (unchanged)
    ============================ */
 const BASE_CSS = `:root{
   --bg:#fafaf9;
@@ -703,8 +743,6 @@ ${body}
    DYNAMIC INDEX PAGE
    ============================ */
 function generateDynamicIndex() {
-  const gvizUrl = `https://docs.google.com/spreadsheets/d/${CONFIG.sheetId}/gviz/tq?tqx=out:json&sheet=${CONFIG.sheetName}`;
-
   const body = `
 <div class="blog-hero">
   <h1>
@@ -733,7 +771,7 @@ function generateDynamicIndex() {
 </div>
 
 <script>
-const GVIZ_URL = '${gvizUrl}';
+const APPS_SCRIPT_URL = '${CONFIG.scriptUrl}';
 
 function escapeHtml(text) {
   if (!text) return '';
@@ -770,14 +808,6 @@ function toTitleCase(str) {
   return str;
 }
 
-function parseGvizValue(val) {
-  if (typeof val === 'string' && val.startsWith('Date(')) {
-    const parts = val.slice(5, -1).split(',').map(Number);
-    return new Date(parts[0], parts[1], parts[2]).toISOString().split('T')[0];
-  }
-  return val;
-}
-
 let allPosts = [];
 
 async function fetchPosts() {
@@ -785,30 +815,23 @@ async function fetchPosts() {
   grid.innerHTML = '<div class="loading">Loading posts...</div>';
 
   try {
-    const res = await fetch(GVIZ_URL);
-    const text = await res.text();
+    let posts;
+    try {
+      const res = await fetch(APPS_SCRIPT_URL, { headers: { 'Accept': 'application/json' } });
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      posts = await res.json();
+    } catch (directErr) {
+      console.log('Direct fetch failed, trying CORS proxy...');
+      const proxyRes = await fetch('https://api.allorigins.win/get?url=' + encodeURIComponent(APPS_SCRIPT_URL));
+      const proxyData = await proxyRes.json();
+      posts = JSON.parse(proxyData.contents);
+    }
 
-    const match = text.match(/google\\.visualization\\.Query\\.setResponse\\(([\\s\\S]*)\\);?$/);
-    if (!match) throw new Error('Invalid response from Google Sheets');
-
-    const data = JSON.parse(match[1]);
-    const cols = data.table.cols.map(c => c.label);
-    const rows = data.table.rows.map(r => {
-      const obj = {};
-      r.c.forEach((cell, i) => {
-        const label = cols[i];
-        if (cell && cell.v !== null && cell.v !== undefined) {
-          obj[label] = parseGvizValue(cell.v);
-        } else {
-          obj[label] = '';
-        }
-      });
-      return obj;
-    });
+    if (!Array.isArray(posts)) throw new Error('Invalid data format');
 
     const now = new Date();
     const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-    rows.forEach(post => {
+    posts.forEach(post => {
       if (post.date) {
         const d = new Date(post.date);
         const postDate = new Date(d.getFullYear(), d.getMonth(), d.getDate());
@@ -817,8 +840,8 @@ async function fetchPosts() {
       post.slug = slugify(post.title);
     });
 
-    rows.sort((a, b) => new Date(b.date || 0) - new Date(a.date || 0));
-    allPosts = rows;
+    posts.sort((a, b) => new Date(b.date || 0) - new Date(a.date || 0));
+    allPosts = posts;
     renderPosts(allPosts);
 
   } catch (err) {
@@ -879,8 +902,6 @@ fetchPosts();
    DYNAMIC POST PAGE
    ============================ */
 function generateDynamicPostPage() {
-  const gvizUrl = `https://docs.google.com/spreadsheets/d/${CONFIG.sheetId}/gviz/tq?tqx=out:json&sheet=${CONFIG.sheetName}`;
-
   const body = `
 <nav class="breadcrumb" aria-label="breadcrumb">
   <a href="./index.html">All Posts</a>
@@ -911,7 +932,7 @@ function generateDynamicPostPage() {
 </article>
 
 <script>
-const GVIZ_URL = '${gvizUrl}';
+const APPS_SCRIPT_URL = '${CONFIG.scriptUrl}';
 
 function escapeHtml(text) {
   if (!text) return '';
@@ -958,14 +979,6 @@ function readingTime(text) {
   return Math.max(1, Math.ceil(words / 200));
 }
 
-function parseGvizValue(val) {
-  if (typeof val === 'string' && val.startsWith('Date(')) {
-    const parts = val.slice(5, -1).split(',').map(Number);
-    return new Date(parts[0], parts[1], parts[2]).toISOString().split('T')[0];
-  }
-  return val;
-}
-
 async function loadPost() {
   const params = new URLSearchParams(window.location.search);
   const targetSlug = params.get('slug');
@@ -976,22 +989,19 @@ async function loadPost() {
   }
 
   try {
-    const res = await fetch(GVIZ_URL);
-    const text = await res.text();
+    let posts;
+    try {
+      const res = await fetch(APPS_SCRIPT_URL, { headers: { 'Accept': 'application/json' } });
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      posts = await res.json();
+    } catch (directErr) {
+      console.log('Direct fetch failed, trying CORS proxy...');
+      const proxyRes = await fetch('https://api.allorigins.win/get?url=' + encodeURIComponent(APPS_SCRIPT_URL));
+      const proxyData = await proxyRes.json();
+      posts = JSON.parse(proxyData.contents);
+    }
 
-    const match = text.match(/google\\.visualization\\.Query\\.setResponse\\(([\\s\\S]*)\\);?$/);
-    if (!match) throw new Error('Invalid response');
-
-    const data = JSON.parse(match[1]);
-    const cols = data.table.cols.map(c => c.label);
-    const posts = data.table.rows.map(r => {
-      const obj = {};
-      r.c.forEach((cell, i) => {
-        const label = cols[i];
-        obj[label] = (cell && cell.v !== null && cell.v !== undefined) ? parseGvizValue(cell.v) : '';
-      });
-      return obj;
-    });
+    if (!Array.isArray(posts)) throw new Error('Invalid data');
 
     posts.forEach(p => { p.slug = slugify(p.title); });
     posts.sort((a, b) => new Date(b.date || 0) - new Date(a.date || 0));
@@ -1053,19 +1063,25 @@ loadPost();
 /* ============================
    BUILD
    ============================ */
-function build() {
-  if (!CONFIG.sheetId) {
-    throw new Error('Sheet ID is missing in CONFIG.');
+async function build() {
+  if (!CONFIG.scriptUrl) {
+    throw new Error('APPS_SCRIPT_URL environment variable is missing.');
   }
 
   if (fs.existsSync(CONFIG.distDir)) {
     fs.rmSync(CONFIG.distDir, { recursive: true });
   }
-  fs.mkdirSync(CONFIG.distDir, { recursive: true });
+  fs.mkdirSync(CONFIG.postsDir, { recursive: true });
 
   fs.writeFileSync(path.join(CONFIG.distDir, 'style.css'), BASE_CSS);
 
-  console.log('Generating dynamic site...');
+  console.log('Fetching posts for sitemap...');
+  const posts = await fetchJson(CONFIG.scriptUrl);
+  if (!Array.isArray(posts)) throw new Error('Expected array from Apps Script');
+
+  posts.forEach(post => { post.slug = slugify(post.title); });
+  posts.sort((a, b) => new Date(b.date) - new Date(a.date));
+  console.log(`Fetched ${posts.length} posts for sitemap`);
 
   /* ---------- DYNAMIC INDEX ---------- */
   fs.writeFileSync(
@@ -1097,7 +1113,13 @@ function build() {
     <lastmod>${today}</lastmod>
     <changefreq>daily</changefreq>
     <priority>0.9</priority>
-  </url>
+  </url>${posts.map(post => `
+  <url>
+    <loc>${baseUrl}/post.html?slug=${post.slug}</loc>
+    <lastmod>${post.date ? new Date(post.date).toISOString().split('T')[0] : today}</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.8</priority>
+  </url>`).join('')}
 </urlset>`;
   fs.writeFileSync(path.join(CONFIG.distDir, 'sitemap.xml'), sitemap);
 
@@ -1108,12 +1130,16 @@ Sitemap: ${baseUrl}/sitemap.xml`;
   fs.writeFileSync(path.join(CONFIG.distDir, 'robots.txt'), robots);
 
   console.log(`✅ Build complete:
-  - Dynamic index.html (fetches live from Google Sheet)
-  - Dynamic post.html (fetches live from Google Sheet)
-  - sitemap.xml
+  - Dynamic index.html (fetches live from Apps Script)
+  - Dynamic post.html (fetches live from Apps Script)
+  - sitemap.xml (${posts.length + 2} URLs)
   - robots.txt
   - style.css
   From now on, just edit your Google Sheet and refresh the website. No more builds!`);
 }
 
-build();
+build().catch(err => {
+  console.error('Build failed:', err.message);
+  if (err.stack) console.error(err.stack);
+  process.exit(1);
+});
