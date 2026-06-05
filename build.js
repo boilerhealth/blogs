@@ -111,7 +111,7 @@ function normalizeDate(dateStr, postTitle) {
 function toTitleCase(str) {
   if (!str) return '';
   if (str === str.toUpperCase() && str.length > 8) {
-    return str.toLowerCase().replace(/\w/g, c => c.toUpperCase());
+    return str.toLowerCase().replace(/\b\w/g, c => c.toUpperCase());
   }
   return str;
 }
@@ -136,8 +136,10 @@ function validatePost(post, index) {
   if (textLen < 300) {
     warnings.push(`Content is very thin (${textLen} chars). Google prefers 800+ words.`);
   }
-  if (!post.excerpt || post.excerpt.length < 20) {
-    warnings.push(`Missing excerpt. Meta description auto-generated from content.`);
+  if (!post.excerpt || post.excerpt.length < 120) {
+    warnings.push(`Excerpt too short (${post.excerpt ? post.excerpt.length : 0} chars). Aim for 120–160 characters for SEO.`);
+  } else if (post.excerpt.length > 160) {
+    warnings.push(`Excerpt too long (${post.excerpt.length} chars). Trim to 160 characters max for SEO.`);
   }
   if (warnings.length) {
     console.log(`\n⚠️  Post #${index + 1} "${post.title}" warnings:`);
@@ -442,6 +444,7 @@ body{
 .blog-img-wrap{
   width:100%;
   height:220px;
+  aspect-ratio:16/9;
   overflow:hidden;
   position:relative;
   background:var(--bg-warm);
@@ -583,6 +586,7 @@ body{
 .article-hero-img{
   width:100%;
   height:400px;
+  aspect-ratio:16/9;
   object-fit:cover;
   border-radius:var(--radius);
   margin-bottom:40px;
@@ -717,7 +721,7 @@ body{
   .filters{padding:0 20px}
   .blog-section{padding:0 20px 40px}
   .article-view{padding:0 20px;margin-top:24px}
-  .article-hero-img{height:240px}
+  .article-hero-img{height:240px;aspect-ratio:16/9}
   .article-header h1{font-size:28px}
   .breadcrumb{padding:0 20px}
 }`;
@@ -866,7 +870,7 @@ async function build() {
     ${sortedPosts.map((post, idx) => `
     <a href="post/${post.slug}.html" class="blog-card reveal-scale revealed stagger-${Math.min(idx % 6 + 1, 6)}">
       <div class="blog-img-wrap">
-        <img class="blog-img" src="${post.image || ''}" alt="${escapeHtml(post.title)}" onerror="this.style.display='none'">
+        <img class="blog-img" src="${post.image || ''}" alt="${escapeHtml(post.title)}" width="800" height="450" loading="lazy" onerror="this.style.display='none'">
       </div>
       <div class="blog-body">
         <div class="blog-meta">
@@ -892,7 +896,7 @@ function filterPosts(category) {
   grid.innerHTML = filtered.map((post, idx) => \`
     <a href="post/\${post.slug}.html" class="blog-card reveal-scale revealed stagger-\${Math.min(idx % 6 + 1, 6)}">
       <div class="blog-img-wrap">
-        <img class="blog-img" src="\${post.image || ''}" alt="\${post.title.replace(/"/g,'&quot;')}" onerror="this.style.display='none'">
+        <img class="blog-img" src="\${post.image || ''}" alt="\${post.title.replace(/"/g,'&quot;')}" width="800" height="450" loading="lazy" onerror="this.style.display='none'">
       </div>
       <div class="blog-body">
         <div class="blog-meta">
@@ -970,7 +974,7 @@ function filterPosts(category) {
 
 <article class="article-view active" style="display:block;">
   <button class="back-btn" onclick="history.back()">← Back to all posts</button>
-  <img class="article-hero-img" src="${post.image || ''}" alt="${escapeHtml(displayTitle)}" onerror="this.style.display='none'">
+  <img class="article-hero-img" src="${post.image || ''}" alt="${escapeHtml(displayTitle)}" width="1200" height="675" onerror="this.style.display='none'">
   <div class="article-header">
     <div class="blog-meta">
       <span class="blog-category">${escapeHtml(post.category)}</span>
