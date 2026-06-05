@@ -8,8 +8,8 @@ const https = require('https');
 const CONFIG = {
   scriptUrl: process.env.APPS_SCRIPT_URL,
   siteUrl: process.env.SITE_URL || 'https://boilerhealth.github.io/blogs',
-  distDir: './docs',    // <-- GitHub Pages can serve from /docs folder
-  postsDir: './docs/post'
+  distDir: './dist',
+  postsDir: './dist/post'
 };
 
 /* ============================
