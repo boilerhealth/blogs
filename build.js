@@ -8,8 +8,8 @@ const https = require('https');
 const CONFIG = {
   scriptUrl: process.env.APPS_SCRIPT_URL,
   siteUrl: process.env.SITE_URL || 'https://boilerhealth.github.io/blogs',
-  distDir: './dist',
-  postsDir: './dist/post'
+  distDir: './docs',    // <-- GitHub Pages can serve from /docs folder
+  postsDir: './docs/post'
 };
 
 /* ============================
@@ -817,12 +817,10 @@ async function fetchPosts() {
   try {
     let posts;
     try {
-      // Try direct fetch first
       const res = await fetch(APPS_SCRIPT_URL, { headers: { 'Accept': 'application/json' } });
       if (!res.ok) throw new Error('HTTP ' + res.status);
       posts = await res.json();
     } catch (directErr) {
-      // Fallback: CORS proxy
       console.log('Direct fetch failed, trying CORS proxy...');
       const proxyRes = await fetch('https://api.allorigins.win/get?url=' + encodeURIComponent(APPS_SCRIPT_URL));
       const proxyData = await proxyRes.json();
@@ -831,7 +829,6 @@ async function fetchPosts() {
 
     if (!Array.isArray(posts)) throw new Error('Invalid data format');
 
-    // Normalize dates
     const now = new Date();
     const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
     posts.forEach(post => {
@@ -1078,7 +1075,7 @@ async function build() {
 
   fs.writeFileSync(path.join(CONFIG.distDir, 'style.css'), BASE_CSS);
 
-  console.log('Fetching posts for final sitemap...');
+  console.log('Fetching posts for sitemap...');
   const posts = await fetchJson(CONFIG.scriptUrl);
   if (!Array.isArray(posts)) throw new Error('Expected array from Apps Script');
 
@@ -1103,42 +1100,42 @@ async function build() {
   /* ---------- SITEMAP.XML ---------- */
   const baseUrl = CONFIG.siteUrl.replace(/\/$/, '');
   const today = new Date().toISOString().split('T')[0];
-  const sitemap = \`<?xml version="1.0" encoding="UTF-8"?>
+  const sitemap = `<?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
   <url>
-    <loc>\${baseUrl}/index.html</loc>
-    <lastmod>\${today}</lastmod>
+    <loc>${baseUrl}/index.html</loc>
+    <lastmod>${today}</lastmod>
     <changefreq>daily</changefreq>
     <priority>1.0</priority>
   </url>
   <url>
-    <loc>\${baseUrl}/post.html</loc>
-    <lastmod>\${today}</lastmod>
+    <loc>${baseUrl}/post.html</loc>
+    <lastmod>${today}</lastmod>
     <changefreq>daily</changefreq>
     <priority>0.9</priority>
-  </url>\${posts.map(post => \`
+  </url>${posts.map(post => `
   <url>
-    <loc>\${baseUrl}/post.html?slug=\${post.slug}</loc>
-    <lastmod>\${post.date ? new Date(post.date).toISOString().split('T')[0] : today}</lastmod>
+    <loc>${baseUrl}/post.html?slug=${post.slug}</loc>
+    <lastmod>${post.date ? new Date(post.date).toISOString().split('T')[0] : today}</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.8</priority>
-  </url>\`).join('')}
-</urlset>\`;
+  </url>`).join('')}
+</urlset>`;
   fs.writeFileSync(path.join(CONFIG.distDir, 'sitemap.xml'), sitemap);
 
   /* ---------- ROBOTS.TXT ---------- */
-  const robots = \`User-agent: *
+  const robots = `User-agent: *
 Allow: /
-Sitemap: \${baseUrl}/sitemap.xml\`;
+Sitemap: ${baseUrl}/sitemap.xml`;
   fs.writeFileSync(path.join(CONFIG.distDir, 'robots.txt'), robots);
 
-  console.log(\`✅ Build complete:
+  console.log(`✅ Build complete:
   - Dynamic index.html (fetches live from Apps Script)
   - Dynamic post.html (fetches live from Apps Script)
-  - sitemap.xml (\${posts.length + 2} URLs)
+  - sitemap.xml (${posts.length + 2} URLs)
   - robots.txt
   - style.css
-  From now on, just edit your Google Sheet and refresh the website. No more builds!\`);
+  From now on, just edit your Google Sheet and refresh the website. No more builds!`);
 }
 
 build().catch(err => {
