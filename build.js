@@ -1,49 +1,19 @@
 const fs = require('fs');
 const path = require('path');
-const https = require('https');
 
 /* ============================
    CONFIG
    ============================ */
 const CONFIG = {
-  scriptUrl: process.env.APPS_SCRIPT_URL,
+  sheetId: '1qFukis10IjqITkoA3pil9rNhJUZjX2yqpCSQYPLgWLI',
+  sheetName: 'Posts',
   siteUrl: process.env.SITE_URL || 'https://boilerhealth.github.io/blogs',
-  distDir: './docs',    // <-- GitHub Pages can serve from /docs folder
-  postsDir: './docs/post'
+  distDir: './dist'
 };
 
 /* ============================
    UTILITIES
    ============================ */
-
-function fetchJson(url) {
-  return new Promise((resolve, reject) => {
-    const maxRedirects = 5;
-    function request(targetUrl, redirectsLeft) {
-      const client = targetUrl.startsWith('https:') ? https : require('http');
-      client.get(targetUrl, { headers: { 'Accept': 'application/json' } }, (res) => {
-        if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
-          if (redirectsLeft <= 0) { reject(new Error('Too many redirects')); return; }
-          request(res.headers.location, redirectsLeft - 1);
-          return;
-        }
-        if (res.statusCode !== 200) {
-          let body = '';
-          res.on('data', chunk => body += chunk);
-          res.on('end', () => reject(new Error(`HTTP ${res.statusCode}: ${body.slice(0, 200)}`)));
-          return;
-        }
-        let data = '';
-        res.on('data', chunk => data += chunk);
-        res.on('end', () => {
-          try { resolve(JSON.parse(data)); } catch (e) { reject(new Error('Invalid JSON')); }
-        });
-      }).on('error', reject);
-    }
-    request(url, maxRedirects);
-  });
-}
-
 function escapeHtml(text) {
   if (!text) return '';
   return String(text)
@@ -52,11 +22,6 @@ function escapeHtml(text) {
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#039;');
-}
-
-function stripHtml(html) {
-  if (!html) return '';
-  return html.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
 }
 
 function formatDate(dateStr) {
@@ -84,13 +49,8 @@ function toTitleCase(str) {
   return str;
 }
 
-function readingTime(text) {
-  const words = stripHtml(text).split(/\s+/).filter(w => w.length > 0).length;
-  return Math.max(1, Math.ceil(words / 200));
-}
-
 /* ============================
-   CSS (unchanged)
+   CSS
    ============================ */
 const BASE_CSS = `:root{
   --bg:#fafaf9;
@@ -743,6 +703,9 @@ ${body}
    DYNAMIC INDEX PAGE
    ============================ */
 function generateDynamicIndex() {
+  // Use CSV export - NO CORS issues, instant updates
+  const csvUrl = `https://docs.google.com/spreadsheets/d/${CONFIG.sheetId}/gviz/tq?tqx=out:csv&sheet=${CONFIG.sheetName}`;
+
   const body = `
 <div class="blog-hero">
   <h1>
@@ -771,7 +734,7 @@ function generateDynamicIndex() {
 </div>
 
 <script>
-const APPS_SCRIPT_URL = '${CONFIG.scriptUrl}';
+const CSV_URL = '${csvUrl}';
 
 function escapeHtml(text) {
   if (!text) return '';
@@ -808,6 +771,48 @@ function toTitleCase(str) {
   return str;
 }
 
+// Parse CSV properly (handles commas inside quotes)
+function parseCSV(csvText) {
+  const lines = csvText.trim().split('\\n');
+  const headers = parseCSVLine(lines[0]);
+  
+  return lines.slice(1).map(line => {
+    const values = parseCSVLine(line);
+    const obj = {};
+    headers.forEach((h, i) => {
+      obj[h] = values[i] || '';
+    });
+    return obj;
+  });
+}
+
+function parseCSVLine(line) {
+  const result = [];
+  let current = '';
+  let inQuotes = false;
+  
+  for (let i = 0; i < line.length; i++) {
+    const char = line[i];
+    const nextChar = line[i + 1];
+    
+    if (char === '"') {
+      if (inQuotes && nextChar === '"') {
+        current += '"';
+        i++; // skip next quote
+      } else {
+        inQuotes = !inQuotes;
+      }
+    } else if (char === ',' && !inQuotes) {
+      result.push(current.trim());
+      current = '';
+    } else {
+      current += char;
+    }
+  }
+  result.push(current.trim());
+  return result;
+}
+
 let allPosts = [];
 
 async function fetchPosts() {
@@ -815,20 +820,15 @@ async function fetchPosts() {
   grid.innerHTML = '<div class="loading">Loading posts...</div>';
 
   try {
-    let posts;
-    try {
-      const res = await fetch(APPS_SCRIPT_URL, { headers: { 'Accept': 'application/json' } });
-      if (!res.ok) throw new Error('HTTP ' + res.status);
-      posts = await res.json();
-    } catch (directErr) {
-      console.log('Direct fetch failed, trying CORS proxy...');
-      const proxyRes = await fetch('https://api.allorigins.win/get?url=' + encodeURIComponent(APPS_SCRIPT_URL));
-      const proxyData = await proxyRes.json();
-      posts = JSON.parse(proxyData.contents);
-    }
+    const res = await fetch(CSV_URL);
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    
+    const csvText = await res.text();
+    const posts = parseCSV(csvText);
 
-    if (!Array.isArray(posts)) throw new Error('Invalid data format');
+    if (!posts.length) throw new Error('No posts found');
 
+    // Normalize dates and generate slugs
     const now = new Date();
     const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
     posts.forEach(post => {
@@ -849,6 +849,7 @@ async function fetchPosts() {
     grid.innerHTML = \`
       <div class="error">
         Failed to load posts: \${escapeHtml(err.message)}<br>
+        <small>Make sure your Google Sheet is published to web</small><br>
         <button onclick="fetchPosts()">Try Again</button>
       </div>\`;
   }
@@ -902,6 +903,8 @@ fetchPosts();
    DYNAMIC POST PAGE
    ============================ */
 function generateDynamicPostPage() {
+  const csvUrl = `https://docs.google.com/spreadsheets/d/${CONFIG.sheetId}/gviz/tq?tqx=out:csv&sheet=${CONFIG.sheetName}`;
+
   const body = `
 <nav class="breadcrumb" aria-label="breadcrumb">
   <a href="./index.html">All Posts</a>
@@ -932,7 +935,7 @@ function generateDynamicPostPage() {
 </article>
 
 <script>
-const APPS_SCRIPT_URL = '${CONFIG.scriptUrl}';
+const CSV_URL = '${csvUrl}';
 
 function escapeHtml(text) {
   if (!text) return '';
@@ -979,6 +982,42 @@ function readingTime(text) {
   return Math.max(1, Math.ceil(words / 200));
 }
 
+function parseCSV(csvText) {
+  const lines = csvText.trim().split('\\n');
+  const headers = parseCSVLine(lines[0]);
+  return lines.slice(1).map(line => {
+    const values = parseCSVLine(line);
+    const obj = {};
+    headers.forEach((h, i) => obj[h] = values[i] || '');
+    return obj;
+  });
+}
+
+function parseCSVLine(line) {
+  const result = [];
+  let current = '';
+  let inQuotes = false;
+  for (let i = 0; i < line.length; i++) {
+    const char = line[i];
+    const nextChar = line[i + 1];
+    if (char === '"') {
+      if (inQuotes && nextChar === '"') {
+        current += '"';
+        i++;
+      } else {
+        inQuotes = !inQuotes;
+      }
+    } else if (char === ',' && !inQuotes) {
+      result.push(current.trim());
+      current = '';
+    } else {
+      current += char;
+    }
+  }
+  result.push(current.trim());
+  return result;
+}
+
 async function loadPost() {
   const params = new URLSearchParams(window.location.search);
   const targetSlug = params.get('slug');
@@ -989,19 +1028,11 @@ async function loadPost() {
   }
 
   try {
-    let posts;
-    try {
-      const res = await fetch(APPS_SCRIPT_URL, { headers: { 'Accept': 'application/json' } });
-      if (!res.ok) throw new Error('HTTP ' + res.status);
-      posts = await res.json();
-    } catch (directErr) {
-      console.log('Direct fetch failed, trying CORS proxy...');
-      const proxyRes = await fetch('https://api.allorigins.win/get?url=' + encodeURIComponent(APPS_SCRIPT_URL));
-      const proxyData = await proxyRes.json();
-      posts = JSON.parse(proxyData.contents);
-    }
-
-    if (!Array.isArray(posts)) throw new Error('Invalid data');
+    const res = await fetch(CSV_URL);
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    
+    const csvText = await res.text();
+    const posts = parseCSV(csvText);
 
     posts.forEach(p => { p.slug = slugify(p.title); });
     posts.sort((a, b) => new Date(b.date || 0) - new Date(a.date || 0));
@@ -1063,41 +1094,32 @@ loadPost();
 /* ============================
    BUILD
    ============================ */
-async function build() {
-  if (!CONFIG.scriptUrl) {
-    throw new Error('APPS_SCRIPT_URL environment variable is missing.');
+function build() {
+  if (!CONFIG.sheetId) {
+    throw new Error('Sheet ID is missing in CONFIG.');
   }
 
   if (fs.existsSync(CONFIG.distDir)) {
     fs.rmSync(CONFIG.distDir, { recursive: true });
   }
-  fs.mkdirSync(CONFIG.postsDir, { recursive: true });
+  fs.mkdirSync(CONFIG.distDir, { recursive: true });
 
   fs.writeFileSync(path.join(CONFIG.distDir, 'style.css'), BASE_CSS);
 
-  console.log('Fetching posts for sitemap...');
-  const posts = await fetchJson(CONFIG.scriptUrl);
-  if (!Array.isArray(posts)) throw new Error('Expected array from Apps Script');
+  console.log('Generating dynamic site...');
 
-  posts.forEach(post => { post.slug = slugify(post.title); });
-  posts.sort((a, b) => new Date(b.date) - new Date(a.date));
-  console.log(`Fetched ${posts.length} posts for sitemap`);
-
-  /* ---------- DYNAMIC INDEX ---------- */
   fs.writeFileSync(
     path.join(CONFIG.distDir, 'index.html'),
     generateDynamicIndex()
   );
   console.log('  Wrote dynamic index.html');
 
-  /* ---------- DYNAMIC POST VIEWER ---------- */
   fs.writeFileSync(
     path.join(CONFIG.distDir, 'post.html'),
     generateDynamicPostPage()
   );
   console.log('  Wrote dynamic post.html');
 
-  /* ---------- SITEMAP.XML ---------- */
   const baseUrl = CONFIG.siteUrl.replace(/\/$/, '');
   const today = new Date().toISOString().split('T')[0];
   const sitemap = `<?xml version="1.0" encoding="UTF-8"?>
@@ -1113,33 +1135,22 @@ async function build() {
     <lastmod>${today}</lastmod>
     <changefreq>daily</changefreq>
     <priority>0.9</priority>
-  </url>${posts.map(post => `
-  <url>
-    <loc>${baseUrl}/post.html?slug=${post.slug}</loc>
-    <lastmod>${post.date ? new Date(post.date).toISOString().split('T')[0] : today}</lastmod>
-    <changefreq>weekly</changefreq>
-    <priority>0.8</priority>
-  </url>`).join('')}
+  </url>
 </urlset>`;
   fs.writeFileSync(path.join(CONFIG.distDir, 'sitemap.xml'), sitemap);
 
-  /* ---------- ROBOTS.TXT ---------- */
   const robots = `User-agent: *
 Allow: /
 Sitemap: ${baseUrl}/sitemap.xml`;
   fs.writeFileSync(path.join(CONFIG.distDir, 'robots.txt'), robots);
 
   console.log(`✅ Build complete:
-  - Dynamic index.html (fetches live from Apps Script)
-  - Dynamic post.html (fetches live from Apps Script)
-  - sitemap.xml (${posts.length + 2} URLs)
+  - Dynamic index.html (fetches live CSV from Google Sheet)
+  - Dynamic post.html (fetches live CSV from Google Sheet)
+  - sitemap.xml
   - robots.txt
   - style.css
-  From now on, just edit your Google Sheet and refresh the website. No more builds!`);
+  From now on, just edit your Google Sheet and refresh the website.`);
 }
 
-build().catch(err => {
-  console.error('Build failed:', err.message);
-  if (err.stack) console.error(err.stack);
-  process.exit(1);
-});
+build();
