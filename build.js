@@ -584,7 +584,90 @@ body{
   font-size:13px;
   letter-spacing:.3px;
 }
+
+/* ============================
+   CTA BLOCK STYLES
+   ============================ */
+.blog_cta_preview{
+  background:#ffffff;
+  border:1px solid var(--border);
+  padding:25px;
+  border-radius:10px;
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+}
+.blog_cta_preview .row{
+  display:flex;
+  flex-wrap:wrap;
+  gap:25px;
+  align-items:center;
+}
+.blog_cta_preview .col-md-5{
+  flex:0 0 38%;
+  min-width:200px;
+}
+.blog_cta_preview .col-md-7{
+  flex:1;
+  min-width:250px;
+}
+.blog_cta_preview figure{margin:0;}
+.blog_cta_preview img{
+  max-width:100%;
+  height:auto;
+  display:block;
+  border-radius:10px;
+}
+.blog_cta_preview h4{
+  margin:0 0 12px 0;
+  color:var(--text);
+  font-size:22px;
+  font-weight:700;
+  text-transform:none;
+  letter-spacing:0;
+}
+.blog_cta_preview p{
+  margin:0 0 10px 0;
+  color:var(--text-secondary);
+  line-height:1.6;
+  font-size:15px;
+}
+.blog_cta_preview .cta_btns{
+  margin-top:18px;
+  display:flex;
+  flex-wrap:wrap;
+  gap:10px;
+}
+.blog_cta_preview .cta_btns a{
+  display:inline-block;
+  padding:12px 24px;
+  background:var(--text);
+  color:#ffffff;
+  text-decoration:none;
+  border-radius:10px;
+  font-weight:600;
+  font-size:15px;
+  transition:all .2s ease;
+  border:none;
+  cursor:pointer;
+}
+.blog_cta_preview .cta_btns a:hover{
+  background:var(--accent-warm);
+  transform:translateY(-2px);
+  box-shadow:0 4px 12px rgba(0,0,0,.15);
+}
+.blog_cta_preview .cta_btns a.last_btn{
+  background:var(--text-tertiary);
+}
+.blog_cta_preview .cta_btns a.last_btn:hover{
+  background:var(--text-secondary);
+}
 @media(max-width:768px){
+  .blog_cta_preview .col-md-5,
+  .blog_cta_preview .col-md-7{
+    flex:0 0 100%;
+  }
+  .blog_cta_preview .row{
+    gap:15px;
+  }
   .header-inner{padding:0 20px}
   .main-nav a:not(.nav-btn){display:none}
   .blog-hero{padding:60px 20px 40px}
@@ -618,7 +701,7 @@ ${schema ? `<script type="application/ld+json">${schema}</script>` : ''}
 
 <div class="scroll-progress" id="scrollProgress"></div>
 
-<header class="site-header">
+<<header class="site-header">
   <div class="header-inner">
     <div class="logo">Boiler<span>Health</span></div>
     <nav class="main-nav">
@@ -630,7 +713,7 @@ ${schema ? `<script type="application/ld+json">${schema}</script>` : ''}
 
 ${body}
 
-<footer class="site-footer">
+<<footer class="site-footer">
   <p>© 2026 BoilerHealth. All Rights Reserved.</p>
 </footer>
 
@@ -853,7 +936,7 @@ function filterPosts(category) {
   const today = new Date().toISOString().split('T')[0];
 
   const sitemap = `<?xml version="1.0" encoding="UTF-8"?>
-<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+<<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
   <url>
     <loc>${baseUrl}/index.html</loc>
     <lastmod>${today}</lastmod>
