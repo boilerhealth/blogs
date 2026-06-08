@@ -701,7 +701,7 @@ ${schema ? `<script type="application/ld+json">${schema}</script>` : ''}
 
 <div class="scroll-progress" id="scrollProgress"></div>
 
-<<header class="site-header">
+<header class="site-header">
   <div class="header-inner">
     <div class="logo">Boiler<span>Health</span></div>
     <nav class="main-nav">
@@ -713,7 +713,7 @@ ${schema ? `<script type="application/ld+json">${schema}</script>` : ''}
 
 ${body}
 
-<<footer class="site-footer">
+<footer class="site-footer">
   <p>© 2026 BoilerHealth. All Rights Reserved.</p>
 </footer>
 
@@ -936,7 +936,7 @@ function filterPosts(category) {
   const today = new Date().toISOString().split('T')[0];
 
   const sitemap = `<?xml version="1.0" encoding="UTF-8"?>
-<<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
   <url>
     <loc>${baseUrl}/index.html</loc>
     <lastmod>${today}</lastmod>
